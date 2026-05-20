@@ -59,3 +59,79 @@ models:
           format_customer_segment macro (replacement for SAS $CUSTSEG).
         data_tests:
           - not_null
+
+  - name: int_claims_adjudication
+    description: >
+      Claims with fraud screening and auto-adjudication results.
+      Migrated from claims_processing.sas (Steps 2-4). SAS hash lookup
+      and IF/THEN routing replaced by broadcast JOIN and SQL CASE.
+    columns:
+      - name: claim_id
+        description: Primary key — unique claim identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: policy_id
+        data_tests:
+          - not_null
+
+      - name: adjudication_result
+        description: >
+          Auto-adjudication outcome. Maps to SAS routing targets:
+          AUTO_ADJUDICATED (APPR/DENY) or MANUAL_REVIEW (PEND).
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['APPR', 'DENY', 'PEND']
+
+      - name: fraud_risk
+        description: >
+          Fraud risk level derived from fraud_score thresholds.
+          HIGH >= 80, MEDIUM >= 50, LOW < 50.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['HIGH', 'MEDIUM', 'LOW']
+
+      - name: claimed_amount
+        data_tests:
+          - not_null
+
+  - name: int_policy_valuation
+    description: >
+      In-force policy valuation with claims experience, premium collections,
+      loss ratios, and reserve estimates. Migrated from policy_valuation.sas
+      (Steps 1-4). SAS MERGE BY → SQL LEFT JOIN.
+    columns:
+      - name: policy_id
+        description: Primary key — unique policy identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: policy_type
+        description: Insurance line of business.
+        data_tests:
+          - not_null
+
+      - name: annual_premium
+        description: Must be positive for active policies.
+        data_tests:
+          - not_null
+
+      - name: premium_adequate
+        description: >
+          Y if combined ratio <= 1.0, else N. Flags policies where
+          premiums may be insufficient to cover losses.
+        data_tests:
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: renewal_due_flag
+        description: >
+          Y if policy expires within 3 months. Replaces SAS intck/intnx
+          calculation.
+        data_tests:
+          - accepted_values:
+              values: ['Y', 'N']

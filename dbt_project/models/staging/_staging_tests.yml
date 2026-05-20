@@ -121,3 +121,60 @@ models:
         description: Date the transaction occurred.
         data_tests:
           - not_null
+
+  - name: stg_claims
+    description: >
+      Validated insurance claims with policy enrichment.
+      Migrated from claims_processing.sas (Step 1). SAS hash object
+      lookup to RAW_INS.POLICIES replaced by broadcast JOIN.
+    columns:
+      - name: claim_id
+        description: Primary key — unique claim identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: policy_id
+        description: FK to policies — validated as active during ingestion.
+        data_tests:
+          - not_null
+
+      - name: claimant_id
+        description: FK to claimant who filed the claim.
+        data_tests:
+          - not_null
+
+      - name: claim_type
+        description: >
+          Type of insurance claim.
+        data_tests:
+          - not_null
+
+      - name: claim_status
+        description: >
+          Claim processing status. Maps to SAS PROC FORMAT $CLMSTAT values.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - OPEN
+                - CLOSED
+                - PENDING
+                - DENIED
+                - SETTLED
+                - REOPENED
+
+      - name: claimed_amount
+        description: Amount claimed — validated to not exceed sum_insured.
+        data_tests:
+          - not_null
+
+      - name: loss_date
+        description: Date of loss — validated within policy period.
+        data_tests:
+          - not_null
+
+      - name: reported_date
+        description: Date the claim was reported.
+        data_tests:
+          - not_null

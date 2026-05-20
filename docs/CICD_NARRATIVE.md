@@ -86,7 +86,7 @@ Tests run automatically after every `dbt test` invocation — in CI, in the Data
 ### 4. Scheduling: Control-M → Databricks Workflows
 
 **Before (SAS + Control-M):**
-The `run_daily_banking.sas` master script was triggered by Control-M at 06:00 daily. It executed steps sequentially via `%run_step` macros. If Step 2 failed, an operator had to manually restart the entire job from the beginning — there was no partial re-run capability. The job definition lived in the Control-M GUI and was not version-controlled.
+The `run_daily_banking.sas` master script was triggered by Control-M at 06:00 daily, along with `claims_processing.sas`, `policy_valuation.sas`, `monthly_regulatory_reporting.sas`, and `customer_profitability.sas`. Each executed sequentially via `%run_step` macros. If Step 2 failed, an operator had to manually restart the entire job from the beginning — there was no partial re-run capability. The job definitions lived in the Control-M GUI and were not version-controlled.
 
 **After (Databricks Workflows):**
 The `workflows/daily_banking_pipeline.json` defines a four-task DAG:
