@@ -1,0 +1,122 @@
+{
+  "name": "daily_banking_pipeline",
+  "description": "Daily banking analytics pipeline — replaces the SAS Control-M scheduled job (run_daily_banking.sas). Executes dbt models in dependency order: staging → intermediate → marts → test. See docs/CICD_NARRATIVE.md for the full migration mapping from Control-M to Databricks Workflows.",
+  "format": "MULTI_TASK",
+  "max_concurrent_runs": 1,
+  "tasks": [
+    {
+      "task_key": "dbt_staging",
+      "description": "Load and validate raw data into staging layer. Replaces SAS Step 1 (%run_step(1, Load Customer Accounts, load_customer_accounts.sas)) and the DATA step validation in daily_transaction_processing.sas.",
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt deps",
+          "dbt run --select tag:staging"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "prod"
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "dbt_intermediate",
+      "description": "Compute derived metrics and business logic. Replaces SAS Step 2 (DATA step computing ACCT_AGE_MONTHS, UTILIZATION_PCT, DORMANCY_FLAG, etc.).",
+      "depends_on": [
+        {
+          "task_key": "dbt_staging"
+        }
+      ],
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt run --select tag:intermediate"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "prod"
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "dbt_marts",
+      "description": "Build final analytical outputs. Replaces SAS Step 3 (credit_risk_scoring.sas) and the PROC APPEND to CURATED datasets. Includes incremental transaction loading, risk scoring, and anomaly detection.",
+      "depends_on": [
+        {
+          "task_key": "dbt_intermediate"
+        }
+      ],
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt run --select tag:marts"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "prod"
+      },
+      "timeout_seconds": 7200,
+      "max_retries": 1,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "dbt_test",
+      "description": "Run all schema and data tests. SAS had no equivalent — QA was manual PROC PRINT/PROC SQL spot checks. dbt tests enforce data contracts declaratively after every run.",
+      "depends_on": [
+        {
+          "task_key": "dbt_marts"
+        }
+      ],
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt test"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "prod"
+      },
+      "timeout_seconds": 1800,
+      "max_retries": 0
+    }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 6 * * ?",
+    "timezone_id": "America/New_York",
+    "pause_status": "UNPAUSED"
+  },
+  "email_notifications": {
+    "on_failure": [
+      "data-engineering-alerts@example.com"
+    ],
+    "on_success": [],
+    "no_alert_for_skipped_runs": true
+  },
+  "webhook_notifications": {
+    "on_failure": [
+      {
+        "id": "${var.pagerduty_webhook_id}"
+      }
+    ]
+  },
+  "tags": {
+    "team": "data-engineering",
+    "domain": "banking-analytics",
+    "migration_source": "sas-control-m",
+    "environment": "production"
+  },
+  "parameters": [
+    {
+      "name": "dbt_target",
+      "default": "prod"
+    },
+    {
+      "name": "full_refresh",
+      "default": "false"
+    }
+  ]
+}

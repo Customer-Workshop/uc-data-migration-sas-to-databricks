@@ -1,0 +1,121 @@
+# dbt Schema Tests — Staging Layer
+#
+# SAS had no built-in data quality testing framework. Validation was done
+# via ad hoc PROC SQL queries, PROC FREQ for value distributions, and
+# manual review of PROC PRINT output. dbt makes data quality testing
+# declarative, version-controlled, and automatically enforced on every run.
+
+version: 2
+
+models:
+  - name: stg_cust_accounts
+    description: >
+      Customer account master joined with demographics.
+      Migrated from load_customer_accounts.sas (Step 1: PROC SQL extract).
+    columns:
+      - name: account_id
+        description: Primary key — unique account identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: Foreign key to customer demographics.
+        data_tests:
+          - not_null
+
+      - name: account_type
+        description: >
+          Account type code. Maps to SAS PROC FORMAT $ACCTTYPE values.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - CHK
+                - SAV
+                - MMA
+                - CD
+                - IRA
+                - LOC
+                - MTG
+                - AUTO
+                - PERS
+                - CC
+                - HELC
+
+      - name: account_status
+        description: >
+          Account status code. Maps to SAS PROC FORMAT $ACCTSTAT values.
+          Note: 'W' (Written Off) and 'C' (Closed) are filtered out in
+          the staging model, matching the SAS WHERE clause.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - A
+                - D
+                - F
+                - R
+                - S
+                - P
+
+      - name: open_date
+        description: Account opening date.
+        data_tests:
+          - not_null
+
+      - name: current_balance
+        description: Current account balance.
+        data_tests:
+          - not_null
+
+  - name: stg_daily_transactions
+    description: >
+      Validated daily transaction feed. Records failing validation are
+      excluded (equivalent to the SAS DATA step routing rejects to
+      WORK.TXN_REJECTED). Rejection reasons are evaluated but only
+      passing records are emitted.
+    columns:
+      - name: transaction_id
+        description: Primary key — unique transaction identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        description: >
+          Foreign key to stg_cust_accounts.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_cust_accounts')
+              field: account_id
+
+      - name: transaction_type
+        description: >
+          Transaction type code. Maps to SAS PROC FORMAT $TXNCAT values.
+          Only valid types pass the staging validation filter.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - DEP
+                - WDR
+                - TRF
+                - PMT
+                - FEE
+                - INT
+                - ADJ
+                - REV
+                - CHG
+                - REF
+
+      - name: transaction_amount
+        description: Transaction amount (positive value).
+        data_tests:
+          - not_null
+
+      - name: transaction_date
+        description: Date the transaction occurred.
+        data_tests:
+          - not_null

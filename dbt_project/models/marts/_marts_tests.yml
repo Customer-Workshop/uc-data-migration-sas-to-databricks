@@ -1,0 +1,108 @@
+# dbt Schema Tests — Marts Layer
+
+version: 2
+
+models:
+  - name: mart_daily_transactions
+    description: >
+      Enriched transaction records with running balances and pre/post
+      transaction balances. Replaces PROC SQL enrichment join + DATA step
+      RETAIN running balance from daily_transaction_processing.sas.
+      Materialized as an incremental model (replaces PROC APPEND).
+    columns:
+      - name: transaction_id
+        description: Primary key — unique transaction identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        description: Foreign key to int_account_metrics.
+        data_tests:
+          - not_null
+
+      - name: transaction_date
+        description: Transaction date.
+        data_tests:
+          - not_null
+
+      - name: transaction_type
+        description: Transaction type code.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - DEP
+                - WDR
+                - TRF
+                - PMT
+                - FEE
+                - INT
+                - ADJ
+                - REV
+                - CHG
+                - REF
+
+      - name: running_balance
+        description: >
+          Cumulative balance after this transaction. Computed via SQL
+          window function, replacing SAS RETAIN + BY-group logic.
+        data_tests:
+          - not_null
+
+  - name: mart_risk_scores
+    description: >
+      Credit risk scores using WOE (Weight of Evidence) logistic
+      regression scorecard. Migrated from credit_risk_scoring.sas.
+      Computes PD (Probability of Default), LGD, EAD, and expected loss.
+    columns:
+      - name: account_id
+        description: Primary key — scored account identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: pd
+        description: >
+          Probability of Default (0–1). Computed via logistic regression
+          using WOE-binned features.
+        data_tests:
+          - not_null
+
+      - name: risk_rating
+        description: >
+          Integer risk rating (1–7) derived from PD thresholds. Replaces
+          the SAS DATA step IF/THEN rating assignment.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+
+      - name: expected_loss
+        description: >
+          Expected loss = PD × LGD × EAD.
+        data_tests:
+          - not_null
+
+  - name: mart_transaction_anomalies
+    description: >
+      Flagged anomalous transactions using Z-score and rule-based
+      detection. Migrated from daily_transaction_processing.sas (Step 3:
+      PROC SQL anomaly detection).
+    columns:
+      - name: transaction_id
+        description: Primary key — the flagged transaction.
+        data_tests:
+          - not_null
+
+      - name: anomaly_type
+        description: >
+          Classification of the anomaly detected.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - HIGH_AMOUNT
+                - OVERDRAFT
+                - LARGE_WITHDRAWAL
+                - ORPHAN_ACCOUNT

@@ -1,0 +1,58 @@
+[sqlfluff]
+dialect = databricks
+templater = dbt
+max_line_length = 120
+large_file_skip_byte_limit = 25000
+
+[sqlfluff:templater:dbt]
+project_dir = dbt_project
+profiles_dir = dbt_project
+profile = databricks
+target = dev
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 4
+indented_joins = false
+indented_ctes = false
+indented_using_on = true
+
+[sqlfluff:layout:type:comma]
+line_position = trailing
+
+# ── Rule Configuration ──────────────────────────────────────────────────
+# These rules enforce consistent SQL style across the migrated dbt models.
+# In SAS, there was no SQL style enforcement — PROC SQL accepted any
+# formatting. These rules ensure the dbt codebase stays readable and
+# consistent as the team grows.
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.length]
+min_alias_length = 1
+
+[sqlfluff:rules:convention.terminator]
+multiline_newline = true
+require_final_semicolon = false
+
+[sqlfluff:rules:references.consistent]
+single_table_references = unqualified
