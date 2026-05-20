@@ -106,3 +106,139 @@ models:
                 - OVERDRAFT
                 - LARGE_WITHDRAWAL
                 - ORPHAN_ACCOUNT
+
+  - name: mart_regulatory_rwa
+    description: >
+      Monthly Risk-Weighted Assets by account type and segment.
+      Basel III standardized approach risk weights.
+      Migrated from monthly_regulatory_reporting.sas (Step 1).
+    columns:
+      - name: report_month
+        description: Reporting period (YYYYMM).
+        data_tests:
+          - not_null
+
+      - name: account_type
+        data_tests:
+          - not_null
+
+      - name: risk_weight
+        description: Basel III risk weight (0.00–1.00).
+        data_tests:
+          - not_null
+
+      - name: total_exposure
+        description: Sum of current_balance for the group.
+        data_tests:
+          - not_null
+
+      - name: rwa
+        description: Risk-weighted assets = exposure × risk_weight.
+        data_tests:
+          - not_null
+
+  - name: mart_delinquency_aging
+    description: >
+      Delinquency aging buckets (Current/1-29/30-59/60-89/90-119/120-179/180+).
+      Migrated from monthly_regulatory_reporting.sas (Step 2).
+      SQL CASE replaces SAS bucket assignment, SQL GROUP BY replaces
+      PROC SQL aggregation.
+    columns:
+      - name: report_month
+        data_tests:
+          - not_null
+
+      - name: delinq_bucket
+        description: Delinquency aging bucket.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - Current
+                - 1-29
+                - 30-59
+                - 60-89
+                - 90-119
+                - 120-179
+                - 180+
+                - Unknown
+
+      - name: n_accounts
+        description: Count of accounts in bucket.
+        data_tests:
+          - not_null
+
+      - name: total_balance
+        description: Sum of balances in bucket.
+        data_tests:
+          - not_null
+
+  - name: mart_loss_ratios
+    description: >
+      Loss ratio summary by line of business (policy type).
+      Migrated from policy_valuation.sas (Step 5). PROC MEANS
+      aggregation replaced by SQL GROUP BY.
+    columns:
+      - name: policy_type
+        description: Insurance line of business.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: n_policies
+        description: Count of in-force policies.
+        data_tests:
+          - not_null
+
+      - name: total_earned
+        description: Total YTD earned premium.
+
+      - name: agg_loss_ratio
+        description: Aggregate loss ratio = total_incurred / total_earned.
+
+      - name: agg_combined_ratio
+        description: Aggregate combined ratio = loss_ratio + 30% expense load.
+
+  - name: mart_customer_pnl
+    description: >
+      Customer-level P&L: interest income, fees, credit loss, net profit.
+      Migrated from customer_profitability.sas (Steps 1-4). Multi-source
+      SAS MERGE BY → multi-ref LEFT JOIN.
+    columns:
+      - name: customer_id
+        description: Primary key — unique customer.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: report_month
+        data_tests:
+          - not_null
+
+      - name: net_interest_income
+        description: Lending income minus deposit cost.
+        data_tests:
+          - not_null
+
+      - name: total_revenue
+        description: Net interest income + fee income.
+        data_tests:
+          - not_null
+
+      - name: net_profit
+        description: Total revenue - operating cost - ECL.
+        data_tests:
+          - not_null
+
+      - name: profit_tier
+        description: >
+          Profitability classification derived from net_profit thresholds.
+          Replaces SAS DATA step IF/THEN tier assignment.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - Highly Profitable
+                - Profitable
+                - Marginal
+                - Unprofitable

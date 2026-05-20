@@ -1,12 +1,12 @@
 {
   "name": "daily_banking_pipeline",
-  "description": "Daily banking analytics pipeline — replaces the SAS Control-M scheduled job (run_daily_banking.sas). Executes dbt models in dependency order: staging → intermediate → marts → test. See docs/CICD_NARRATIVE.md for the full migration mapping from Control-M to Databricks Workflows.",
+  "description": "Daily banking and insurance analytics pipeline — replaces the SAS Control-M scheduled jobs (run_daily_banking.sas, claims_processing.sas, policy_valuation.sas, monthly_regulatory_reporting.sas, customer_profitability.sas). Executes dbt models in dependency order: staging → intermediate → marts → test. See docs/CICD_NARRATIVE.md for the full migration mapping from Control-M to Databricks Workflows.",
   "format": "MULTI_TASK",
   "max_concurrent_runs": 1,
   "tasks": [
     {
       "task_key": "dbt_staging",
-      "description": "Load and validate raw data into staging layer. Replaces SAS Step 1 (%run_step(1, Load Customer Accounts, load_customer_accounts.sas)) and the DATA step validation in daily_transaction_processing.sas.",
+      "description": "Load and validate raw data into staging layer. Replaces SAS Step 1 (%run_step(1, Load Customer Accounts, load_customer_accounts.sas)), daily_transaction_processing.sas validation, and claims_processing.sas (Step 1: hash object policy lookup).",
       "dbt_task": {
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
@@ -23,7 +23,7 @@
     },
     {
       "task_key": "dbt_intermediate",
-      "description": "Compute derived metrics and business logic. Replaces SAS Step 2 (DATA step computing ACCT_AGE_MONTHS, UTILIZATION_PCT, DORMANCY_FLAG, etc.).",
+      "description": "Compute derived metrics and business logic. Replaces SAS Step 2 (DATA step computing ACCT_AGE_MONTHS, UTILIZATION_PCT, DORMANCY_FLAG), claims_processing.sas (Steps 2-4: fraud screening and adjudication), and policy_valuation.sas (Steps 1-4: premium, claims experience, reserves).",
       "depends_on": [
         {
           "task_key": "dbt_staging"
@@ -44,7 +44,7 @@
     },
     {
       "task_key": "dbt_marts",
-      "description": "Build final analytical outputs. Replaces SAS Step 3 (credit_risk_scoring.sas) and the PROC APPEND to CURATED datasets. Includes incremental transaction loading, risk scoring, and anomaly detection.",
+      "description": "Build final analytical outputs. Replaces SAS Step 3 (credit_risk_scoring.sas), monthly_regulatory_reporting.sas (RWA and delinquency aging), policy_valuation.sas (Step 5: loss ratios), and customer_profitability.sas (Steps 1-4: P&L). Includes incremental transaction loading, risk scoring, anomaly detection, regulatory reporting, and insurance analytics.",
       "depends_on": [
         {
           "task_key": "dbt_intermediate"
