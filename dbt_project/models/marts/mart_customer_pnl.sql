@@ -59,6 +59,7 @@ fee_income as (
         end) as int_credited,
         count(*) as txn_volume
     from {{ ref('mart_daily_transactions') }}
+    where date_format(transaction_date, 'yyyyMM') = '{{ var("prev_ym") }}'
     group by customer_id
 ),
 
