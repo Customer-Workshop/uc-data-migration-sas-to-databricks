@@ -5,7 +5,7 @@
 # interactively or scheduled via Control-M. This Makefile provides
 # a standardized developer workflow.
 
-.PHONY: install lint lint-fix compile test run run-staging run-intermediate run-marts ci clean help
+.PHONY: install lint lint-fix compile parse test run run-staging run-intermediate run-marts ci clean help
 
 DBT_DIR := dbt_project
 SQLFLUFF_CONFIG := .sqlfluff
@@ -25,8 +25,11 @@ lint: ## Run sqlfluff linter on all models
 lint-fix: ## Auto-fix sqlfluff lint violations
 	sqlfluff fix $(DBT_DIR)/models/ --config $(SQLFLUFF_CONFIG) --ignore templating,parsing --force
 
-compile: ## Compile dbt models (syntax validation, no connection required)
+compile: ## Compile dbt models (requires Databricks connection)
 	cd $(DBT_DIR) && dbt compile --target dev
+
+parse: ## Parse/validate dbt project (no connection required)
+	cd $(DBT_DIR) && dbt parse --target dev
 
 test: ## Run dbt schema tests (requires Databricks connection)
 	cd $(DBT_DIR) && dbt test --target dev
@@ -45,7 +48,7 @@ run: ## Run all dbt models in layer order (staging → intermediate → marts)
 	cd $(DBT_DIR) && dbt run --select tag:intermediate
 	cd $(DBT_DIR) && dbt run --select tag:marts
 
-ci: lint compile ## Run full CI pipeline locally (lint + compile)
+ci: lint parse ## Run full CI pipeline locally (lint + parse)
 	@echo ""
 	@echo "CI checks passed. To run integration tests, set DATABRICKS_* env vars and run: make test"
 

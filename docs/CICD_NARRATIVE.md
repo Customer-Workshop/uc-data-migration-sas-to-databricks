@@ -14,7 +14,7 @@ The SAS environment operated without modern software engineering practices. Code
 |---|---|---|
 | **Version Control** | None — SAS programs stored on shared file systems (`/data/sas/programs/`). No history, no branching, no audit trail. Multiple developers editing the same file risked overwrites. | Git (GitHub) — full history, branching, pull requests, blame, and diff. Every change is attributable and reversible. |
 | **Code Review** | None — developers promoted code directly. At best, email-based review of `.sas` files. | Pull request workflow — every change requires review before merge. Inline comments, approval gates, and conversation threads. |
-| **CI/CD Pipeline** | None — SAS had no equivalent. Code was deployed by copying files or importing `.spk` packages via SAS Management Console. | GitHub Actions — automated linting (sqlfluff), compilation (dbt compile), and schema testing (dbt test) on every PR. Merge is blocked until checks pass. |
+| **CI/CD Pipeline** | None — SAS had no equivalent. Code was deployed by copying files or importing `.spk` packages via SAS Management Console. | GitHub Actions — automated linting (sqlfluff), project validation (dbt parse), and schema testing (dbt test) on every PR. Merge is blocked until checks pass. |
 | **Linting / Style** | None — SAS code style was informal and inconsistent across developers. No tooling existed to enforce standards. | sqlfluff with Databricks dialect — enforces consistent SQL style, keyword casing, aliasing rules. Runs in CI and as a pre-commit hook. |
 | **Data Quality Testing** | Manual — ad hoc PROC SQL counts, PROC FREQ distributions, PROC PRINT spot checks. Results reviewed in SAS log files by analysts. | Declarative dbt tests — `not_null`, `unique`, `accepted_values`, `relationships` defined in YAML. Run automatically after every dbt invocation. |
 | **Scheduling** | Control-M — external scheduler triggered `run_daily_banking.sas` master script via `%run_step` macro calls. Job definitions stored in Control-M GUI (not version-controlled). | Databricks Workflows — JSON definition version-controlled in Git. Cron scheduling with task-level dependency DAG, automatic retry, and "Repair Run" for partial re-execution. |
@@ -46,7 +46,7 @@ Code was deployed directly to production without automated checks. A developer w
 The `.github/workflows/dbt_ci.yml` pipeline runs on every pull request:
 
 1. **sqlfluff lint** — enforces SQL style consistency (SAS had no linting)
-2. **dbt compile** — validates all Jinja templates and SQL syntax without a live connection
+2. **dbt parse** — validates all Jinja templates, ref/source resolution, and YAML schemas without a live connection
 3. **dbt test** — runs schema tests against a CI-specific schema (when credentials are available)
 
 Merge is blocked until all checks pass. This catches errors hours or days before they would have been discovered in the SAS batch run.
