@@ -48,7 +48,7 @@ risk_weighted as (
         customer_segment,
         case
             when account_type in ('CHK', 'SAV', 'MMA') then 0.00
-            when account_type = 'CD'                    then 0.00
+            when account_type in ('CD', 'IRA')          then 0.00
             when account_type = 'MTG' and ltv <= 0.80   then 0.35
             when account_type = 'MTG' and ltv > 0.80    then 0.50
             when account_type = 'HELC'                  then 0.50
@@ -61,7 +61,7 @@ risk_weighted as (
         sum(current_balance) as total_exposure,
         sum(current_balance * case
             when account_type in ('CHK', 'SAV', 'MMA') then 0.00
-            when account_type = 'CD'                    then 0.00
+            when account_type in ('CD', 'IRA')          then 0.00
             when account_type = 'MTG' and ltv <= 0.80   then 0.35
             when account_type = 'MTG' and ltv > 0.80    then 0.50
             when account_type = 'HELC'                  then 0.50
