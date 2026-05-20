@@ -178,3 +178,45 @@ models:
         description: Date the claim was reported.
         data_tests:
           - not_null
+
+  - name: stg_policies
+    description: >
+      In-force insurance policies with derived valuation fields.
+      Migrated from policy_valuation.sas (Step 1: PROC SQL extract).
+      Filters to active policies within their effective period and
+      computes policy_age_months, months_to_expiry, renewal_due_flag,
+      and ytd_earned_premium.
+    columns:
+      - name: policy_id
+        description: Primary key — unique policy identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: FK to customer who holds the policy.
+        data_tests:
+          - not_null
+
+      - name: policy_type
+        description: >
+          Insurance line of business. Maps to SAS PROC FORMAT $POLTYPE.
+        data_tests:
+          - not_null
+
+      - name: annual_premium
+        description: Annual premium amount — must be positive for in-force.
+        data_tests:
+          - not_null
+
+      - name: renewal_due_flag
+        description: >
+          Y if policy expires within 3 months. Replaces SAS intnx() check.
+        data_tests:
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: ytd_earned_premium
+        description: >
+          Year-to-date earned premium (monthly pro-rata). Replaces SAS
+          intck-based earned premium calculation.
