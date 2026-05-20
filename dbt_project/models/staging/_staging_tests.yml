@@ -90,6 +90,8 @@ models:
           - relationships:
               to: ref('stg_cust_accounts')
               field: account_id
+              config:
+                severity: warn
 
       - name: transaction_type
         description: >

@@ -11,7 +11,7 @@
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
           "dbt deps",
-          "dbt run --select tag:staging"
+          "dbt run --select tag:staging --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
@@ -32,7 +32,7 @@
       "dbt_task": {
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
-          "dbt run --select tag:intermediate"
+          "dbt run --select tag:intermediate --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
@@ -53,7 +53,7 @@
       "dbt_task": {
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
-          "dbt run --select tag:marts"
+          "dbt run --select tag:marts --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
@@ -74,7 +74,7 @@
       "dbt_task": {
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
-          "dbt test"
+          "dbt test --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
@@ -113,10 +113,6 @@
     {
       "name": "dbt_target",
       "default": "prod"
-    },
-    {
-      "name": "full_refresh",
-      "default": "false"
     }
   ]
 }

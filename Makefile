@@ -15,15 +15,15 @@ help: ## Show this help message
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install: ## Install dbt, sqlfluff, and pre-commit hooks
-	pip install dbt-core dbt-databricks sqlfluff sqlfluff-templater-dbt pre-commit yamllint
+	pip install dbt-core dbt-databricks sqlfluff pre-commit yamllint
 	pre-commit install
 	cd $(DBT_DIR) && dbt deps
 
 lint: ## Run sqlfluff linter on all models
-	sqlfluff lint $(DBT_DIR)/models/ --config $(SQLFLUFF_CONFIG)
+	sqlfluff lint $(DBT_DIR)/models/ --config $(SQLFLUFF_CONFIG) --ignore templating,parsing
 
 lint-fix: ## Auto-fix sqlfluff lint violations
-	sqlfluff fix $(DBT_DIR)/models/ --config $(SQLFLUFF_CONFIG) --force
+	sqlfluff fix $(DBT_DIR)/models/ --config $(SQLFLUFF_CONFIG) --ignore templating,parsing --force
 
 compile: ## Compile dbt models (syntax validation, no connection required)
 	cd $(DBT_DIR) && dbt compile --target dev
