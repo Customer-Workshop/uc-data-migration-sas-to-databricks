@@ -18,7 +18,8 @@
         "schema": "prod"
       },
       "timeout_seconds": 3600,
-      "max_retries": 1,
+      "max_retries": 2,
+      "min_retry_interval_millis": 60000,
       "retry_on_timeout": true
     },
     {
@@ -40,6 +41,7 @@
       },
       "timeout_seconds": 3600,
       "max_retries": 1,
+      "min_retry_interval_millis": 30000,
       "retry_on_timeout": true
     },
     {
@@ -61,6 +63,7 @@
       },
       "timeout_seconds": 7200,
       "max_retries": 1,
+      "min_retry_interval_millis": 30000,
       "retry_on_timeout": true
     },
     {
@@ -94,12 +97,36 @@
       "data-engineering-alerts@example.com"
     ],
     "on_success": [],
+    "on_duration_warning_threshold_exceeded": [
+      "data-engineering-alerts@example.com"
+    ],
     "no_alert_for_skipped_runs": true
   },
   "webhook_notifications": {
     "on_failure": [
       {
         "id": "${var.pagerduty_webhook_id}"
+      },
+      {
+        "id": "${var.slack_webhook_id}"
+      }
+    ],
+    "on_duration_warning_threshold_exceeded": [
+      {
+        "id": "${var.slack_webhook_id}"
+      }
+    ]
+  },
+  "notification_settings": {
+    "no_alert_for_canceled_runs": true,
+    "alert_on_last_attempt": true
+  },
+  "health": {
+    "rules": [
+      {
+        "metric": "RUN_DURATION_SECONDS",
+        "op": "GREATER_THAN",
+        "value": 10800
       }
     ]
   },
