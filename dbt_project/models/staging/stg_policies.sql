@@ -45,8 +45,8 @@ in_force as (
         end as renewal_due_flag,
 
         -- SAS: YTD earned premium (monthly pro-rata)
-        annual_premium / 12 *
-            least(12, months_between(
+        annual_premium / 12
+            * least(12, months_between(
                 least(current_date(), expiration_date),
                 greatest(effective_date, trunc(current_date(), 'YEAR'))
             )) as ytd_earned_premium
