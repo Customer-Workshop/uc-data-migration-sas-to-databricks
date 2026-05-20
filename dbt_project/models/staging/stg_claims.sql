@@ -19,7 +19,7 @@ with claims_feed as (
 ),
 
 active_policies as (
-    select /*+ BROADCAST(p) */
+    select
         policy_id,
         policy_type,
         effective_date,
@@ -32,7 +32,7 @@ active_policies as (
 
 -- SAS: hash object lookup (h_pol.find()) + validation checks
 validated as (
-    select
+    select /*+ BROADCAST(p) */
         c.*,
         p.policy_type,
         p.effective_date   as policy_effective_date,
