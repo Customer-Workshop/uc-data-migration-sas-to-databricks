@@ -14,7 +14,8 @@ Target-state dbt project for migrating SAS analytics programs to dbt + Databrick
 │   ├── dbt_project.yml           # Project config with Databricks profile
 │   └── profiles.yml              # Databricks connection config (env-var-based)
 ├── docs/
-│   └── SAS_TO_DBT_MIGRATION_MAP.md  # Complete SAS→dbt construct mapping
+│   ├── SAS_TO_DBT_MIGRATION_MAP.md  # Complete SAS→dbt construct mapping
+│   └── SCHEMA_MAPPING.md            # SAS LIBNAME → dbt/Databricks schema mapping
 └── README.md
 ```
 
@@ -30,7 +31,7 @@ Target-state dbt project for migrating SAS analytics programs to dbt + Databrick
 | `policy_valuation.sas` | (planned) `int_policy_valuation` → `mart_loss_ratios` | MERGE BY → SQL JOIN |
 | `customer_profitability.sas` | (planned) `mart_customer_pnl` | Multi-source merge → multi-ref JOIN |
 
-See [`docs/SAS_TO_DBT_MIGRATION_MAP.md`](docs/SAS_TO_DBT_MIGRATION_MAP.md) for the complete construct-level mapping (LIBNAME → Unity Catalog, PROC FORMAT → dbt macros, RETAIN → window functions, hash objects → broadcast joins, etc.).
+See [`docs/SAS_TO_DBT_MIGRATION_MAP.md`](docs/SAS_TO_DBT_MIGRATION_MAP.md) for the complete construct-level mapping and [`docs/SCHEMA_MAPPING.md`](docs/SCHEMA_MAPPING.md) for the SAS LIBNAME → Databricks Unity Catalog schema mapping.
 
 ## SAS Construct → dbt/Databricks Summary
 
