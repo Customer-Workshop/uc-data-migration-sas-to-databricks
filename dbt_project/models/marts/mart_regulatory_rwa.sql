@@ -19,10 +19,6 @@ with accounts as (
     select * from {{ ref('int_account_metrics') }}
 ),
 
-loan_details as (
-    select * from {{ source('banking_raw', 'loan_details') }}
-),
-
 collateral as (
     select * from {{ source('banking_raw', 'collateral') }}
 ),
