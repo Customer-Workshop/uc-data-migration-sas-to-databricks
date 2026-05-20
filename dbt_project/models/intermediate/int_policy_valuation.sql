@@ -66,9 +66,9 @@ claims_exp as (
         sum(c.paid_amount) as total_paid,
         sum(c.reserved_amount) as total_reserved,
         max(c.loss_date) as last_claim_date,
-        sum(case when c.claim_status in ('OPEN', 'INV', 'ADJ', 'PEND')
+        sum(case when c.claim_status in ('OPEN', 'PENDING', 'REOPENED')
             then c.reserved_amount else 0 end) as open_reserves,
-        sum(case when c.claim_status = 'DENY' then 1 else 0 end)
+        sum(case when c.claim_status = 'DENIED' then 1 else 0 end)
             as denied_claims
     from {{ source('insurance_raw', 'claims') }} c
     where c.loss_date >= add_months(current_date(), -12)
