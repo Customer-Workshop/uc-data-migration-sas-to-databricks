@@ -58,6 +58,7 @@ select
 
     -- SAS: Basel III minimum thresholds — CET1 >= 4.5%
     case
+        when r.total_rwa is null then null
         when r.total_rwa = 0 then 'PASS'
         when {{ var('cet1_capital', 50000000) }} / r.total_rwa * 100 >= 4.5 then 'PASS'
         else 'FAIL'
@@ -65,6 +66,7 @@ select
 
     -- SAS: Basel III minimum thresholds — Tier1 >= 6.0%
     case
+        when r.total_rwa is null then null
         when r.total_rwa = 0 then 'PASS'
         when {{ var('tier1_capital', 65000000) }} / r.total_rwa * 100 >= 6.0 then 'PASS'
         else 'FAIL'
@@ -72,6 +74,7 @@ select
 
     -- SAS: Basel III minimum thresholds — Total Capital >= 8.0%
     case
+        when r.total_rwa is null then null
         when r.total_rwa = 0 then 'PASS'
         when {{ var('total_capital', 80000000) }} / r.total_rwa * 100 >= 8.0 then 'PASS'
         else 'FAIL'
