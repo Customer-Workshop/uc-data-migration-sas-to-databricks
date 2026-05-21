@@ -58,7 +58,11 @@ aging as (
     -- SAS: WHERE a.SNAPSHOT_DATE = "&month_end"d AND a.ACCOUNT_TYPE IN (lending types)
     where a.last_activity_date <= last_day(to_date({{ var('report_month') }} || '01', 'yyyyMMdd'))
       and a.account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
-    group by 1, 2, 3, 4
+    group by
+        report_month,
+        a.account_type,
+        a.region_code,
+        delinq_bucket
 )
 
 select * from aging

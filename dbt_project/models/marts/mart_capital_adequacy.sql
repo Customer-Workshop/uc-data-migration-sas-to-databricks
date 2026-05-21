@@ -22,8 +22,7 @@
 
 -- SAS: PROC SQL CREATE TABLE REPORTS.CAPITAL_ADEQUACY → dbt: SELECT from ref()
 with rwa_totals as (
-    select
-        sum(rwa) as total_rwa
+    select sum(rwa) as total_rwa
     from {{ ref('mart_regulatory_rwa') }}
 )
 

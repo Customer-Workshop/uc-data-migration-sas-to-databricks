@@ -74,7 +74,11 @@ rwa as (
     -- SAS: WHERE a.SNAPSHOT_DATE = "&month_end"d
     -- Filter to month-end snapshot using last_day of the report_month
     where a.last_activity_date <= last_day(to_date({{ var('report_month') }} || '01', 'yyyyMMdd'))
-    group by 1, 2, 3, 4
+    group by
+        report_month,
+        a.account_type,
+        a.customer_segment,
+        risk_weight
 )
 
 select * from rwa
