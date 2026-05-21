@@ -126,6 +126,13 @@ models:
         description: Basel III risk weight (0.00–1.00).
         data_tests:
           - not_null
+          - accepted_values:
+              values:
+                - 0.00
+                - 0.35
+                - 0.50
+                - 0.75
+                - 1.00
 
       - name: total_exposure
         description: Sum of current_balance for the group.
@@ -172,6 +179,82 @@ models:
         description: Sum of balances in bucket.
         data_tests:
           - not_null
+
+  - name: mart_llp_coverage
+    description: >
+      Loan Loss Provision coverage by account type.
+      Migrated from monthly_regulatory_reporting.sas (Step 3).
+      Computes gross loans, total allowance, coverage %, NPL balance,
+      and NPL coverage %.
+    columns:
+      - name: report_month
+        description: Reporting period (YYYYMM).
+        data_tests:
+          - not_null
+
+      - name: account_type
+        data_tests:
+          - not_null
+
+      - name: n_loans
+        description: Count of loans.
+        data_tests:
+          - not_null
+
+      - name: gross_loans
+        description: Sum of current balances.
+        data_tests:
+          - not_null
+
+      - name: coverage_pct
+        description: Allowance / gross loans × 100.
+        data_tests:
+          - not_null
+
+      - name: npl_balance
+        description: Non-performing loan balance (DPD >= 90).
+        data_tests:
+          - not_null
+
+  - name: mart_capital_adequacy
+    description: >
+      Capital adequacy ratios (CET1, Tier1, Total Capital) vs Basel III minimums.
+      Migrated from monthly_regulatory_reporting.sas (Step 5).
+      References mart_regulatory_rwa for total RWA.
+    columns:
+      - name: report_month
+        description: Reporting period (YYYYMM).
+        data_tests:
+          - not_null
+
+      - name: total_rwa
+        description: Total risk-weighted assets.
+        data_tests:
+          - not_null
+
+      - name: cet1_status
+        description: PASS/FAIL against Basel III CET1 >= 4.5% minimum.
+        data_tests:
+          - accepted_values:
+              values:
+                - PASS
+                - FAIL
+
+      - name: tier1_status
+        description: PASS/FAIL against Basel III Tier1 >= 6.0% minimum.
+        data_tests:
+          - accepted_values:
+              values:
+                - PASS
+                - FAIL
+
+      - name: total_capital_status
+        description: PASS/FAIL against Basel III Total Capital >= 8.0% minimum.
+        data_tests:
+          - accepted_values:
+              values:
+                - PASS
+                - FAIL
 
   - name: mart_loss_ratios
     description: >

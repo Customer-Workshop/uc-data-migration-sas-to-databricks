@@ -25,7 +25,7 @@ Target-state dbt project for migrating SAS analytics programs to dbt + Databrick
 | `load_customer_accounts.sas` | `stg_cust_accounts` → `int_account_metrics` | PROC SQL + DATA step → SQL + CASE |
 | `daily_transaction_processing.sas` | `stg_daily_transactions` → `mart_daily_transactions` | RETAIN → window function |
 | `credit_risk_scoring.sas` | `mart_risk_scores` | WOE scorecard → nested CASE + exp() |
-| `monthly_regulatory_reporting.sas` | (planned) `mart_regulatory_rwa` + `mart_delinquency_aging` | PROC SQL aggregation → SQL GROUP BY |
+| `monthly_regulatory_reporting.sas` | `mart_regulatory_rwa` + `mart_delinquency_aging` + `mart_llp_coverage` + `mart_capital_adequacy` | PROC SQL aggregation → SQL GROUP BY |
 | `claims_processing.sas` | (planned) `stg_claims` → `int_claims_adjudication` | Hash lookup → broadcast join |
 | `policy_valuation.sas` | (planned) `int_policy_valuation` → `mart_loss_ratios` | MERGE BY → SQL JOIN |
 | `customer_profitability.sas` | (planned) `mart_customer_pnl` | Multi-source merge → multi-ref JOIN |

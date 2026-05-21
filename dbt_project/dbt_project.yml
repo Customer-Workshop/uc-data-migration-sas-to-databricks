@@ -22,6 +22,8 @@ vars:
   curr_dt: "{{ run_started_at.strftime('%Y-%m-%d') }}"
   prev_ym: "{{ (run_started_at.replace(day=1) - modules.datetime.timedelta(days=1)).strftime('%Y%m') }}"
   max_obs_warn: 10000000
+  # SAS: &PREV_YM → dbt var for monthly regulatory reporting models
+  report_month: "{{ (run_started_at.replace(day=1) - modules.datetime.timedelta(days=1)).strftime('%Y%m') }}"
 
 models:
   sas_to_databricks_migration:
