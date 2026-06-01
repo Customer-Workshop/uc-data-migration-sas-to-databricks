@@ -99,9 +99,94 @@ class Reconciler:
             )
         )
 
+    def check_pnl_completeness(self):
+        """mart_customer_pnl row count must equal distinct customers in source."""
+        expected = self._scalar(
+            f"select count(distinct customer_id) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_customer_pnl")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected customers = {expected}, model rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_pnl_relationship_control_total(self):
+        """Total relationship in mart must tie out to source account balances."""
+        source_total = self._scalar(
+            f"select cast(sum(current_balance) as decimal(38,2)) from {self.intermediate}.int_account_metrics"
+        )
+        mart_total = self._scalar(
+            f"select cast(sum(total_relationship) as decimal(38,2)) from {self.marts}.mart_customer_pnl"
+        )
+        diff = abs((mart_total or 0) - (source_total or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "pnl_relationship_control_total",
+                "PASS" if ok else "FAIL",
+                f"source balance sum = {source_total}, mart total_relationship = {mart_total}, diff = {diff}",
+                {"source_total": source_total, "mart_total": mart_total, "diff": float(diff)},
+            )
+        )
+
+    def check_pnl_account_type_parity(self):
+        """Every source account type must be classified as lending or deposit."""
+        n_unclassified = self._scalar(
+            f"""
+            select count(*)
+            from (
+                select distinct account_type from {self.intermediate}.int_account_metrics
+            )
+            where account_type not in ('MTG','AUTO','PERS','CC','LOC','HELC',
+                                        'CHK','SAV','MMA','CD','IRA')
+            """
+        )
+        ok = n_unclassified == 0
+        self.results.append(
+            CheckResult(
+                "pnl_account_type_parity",
+                "PASS" if ok else "FAIL",
+                f"{n_unclassified} unclassified account type(s)" if n_unclassified else "all account types covered",
+                {"unclassified_count": n_unclassified},
+            )
+        )
+
+    def check_pnl_profit_tier_parity(self):
+        """Every profit_tier must match its net_profit threshold."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_customer_pnl
+            where profit_tier <> case
+                when net_profit >= 500 then 'Highly Profitable'
+                when net_profit >= 100 then 'Profitable'
+                when net_profit >= 0 then 'Marginal'
+                else 'Unprofitable'
+            end
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "pnl_profit_tier_parity",
+                "PASS" if ok else "FAIL",
+                f"{mismatches} tier/net_profit mismatches" if mismatches else "all tiers match thresholds",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_pnl_completeness()
+        self.check_pnl_relationship_control_total()
+        self.check_pnl_account_type_parity()
+        self.check_pnl_profit_tier_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
