@@ -1,0 +1,58 @@
+# Databricks Asset Bundle — SAS → dbt/Databricks migration
+#
+# This is the IaC layer the workshop narrative described but never shipped.
+# It replaces the hand-maintained workflows/daily_banking_pipeline.json (which
+# used Terraform-style ${var.x} placeholders that do not run against the Jobs
+# API) with a deployable bundle: `databricks bundle deploy` syncs the project to
+# the workspace and creates/updates the Workflow + tasks as version-controlled
+# code.
+#
+# Quick start:
+#   export DATABRICKS_HOST=...   DATABRICKS_TOKEN=...
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run daily_banking_pipeline -t dev
+
+bundle:
+  name: sas-to-databricks-migration
+
+include:
+  - resources/*.yml
+
+variables:
+  warehouse_id:
+    description: SQL warehouse id used by the dbt tasks.
+    default: "890be8990bf134aa"
+  catalog:
+    description: Unity Catalog catalog for all inputs and outputs.
+    default: banking_analytics
+  dbt_schema:
+    description: >
+      Schema prefix for build outputs. dbt writes <dbt_schema>_staging /
+      _intermediate / _marts; the PySpark job writes <dbt_schema>_curated.
+    default: dev
+  notifications_email:
+    description: Address for job failure notifications.
+    default: data-engineering-alerts@example.com
+
+targets:
+  # Development target — deploys are namespaced per-user and the schedule is
+  # paused automatically (`mode: development`).
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-248ae8cf-2d5d.cloud.databricks.com
+    variables:
+      dbt_schema: dev
+
+  # Production target — deployed by CI on merge to main.
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-248ae8cf-2d5d.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      dbt_schema: prod
+    run_as:
+      user_name: ${workspace.current_user.userName}

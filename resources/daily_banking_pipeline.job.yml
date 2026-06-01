@@ -1,0 +1,105 @@
+# Daily banking & insurance analytics pipeline.
+#
+# Replaces the SAS/Control-M batch orchestration (run_daily_banking.sas +
+# claims_processing.sas). Tasks run in dependency order:
+#   dbt_staging -> dbt_intermediate -> dbt_marts -> dbt_test
+# plus the PySpark alternative (pyspark_claims_processing) which runs in parallel
+# off the staged data to show the imperative migration path alongside dbt.
+
+resources:
+  jobs:
+    daily_banking_pipeline:
+      name: daily_banking_pipeline
+      tags:
+        team: data-engineering
+        domain: banking-analytics
+        migration_source: sas-control-m
+
+      # SAS Control-M calendar -> cron. Kept PAUSED in the bundle so deploys
+      # never trigger surprise (billable) runs; unpause in the UI when desired.
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      parameters:
+        - name: dbt_target
+          default: ${var.dbt_schema}
+
+      # Serverless environment for the dbt CLI and the PySpark task.
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - dbt-databricks>=1.7,<2.0
+
+      tasks:
+        # ── dbt: staging (replaces SAS Step 1 extracts/validation) ──────────
+        - task_key: dbt_staging
+          dbt_task:
+            project_directory: ../dbt_project
+            commands:
+              - dbt deps
+              - dbt run --select tag:staging
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.dbt_schema}
+          environment_key: default
+
+        # ── dbt: intermediate (replaces SAS DATA-step business logic) ───────
+        - task_key: dbt_intermediate
+          depends_on:
+            - task_key: dbt_staging
+          dbt_task:
+            project_directory: ../dbt_project
+            commands:
+              - dbt run --select tag:intermediate
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.dbt_schema}
+          environment_key: default
+
+        # ── dbt: marts (risk, anomalies, regulatory, insurance) ─────────────
+        - task_key: dbt_marts
+          depends_on:
+            - task_key: dbt_intermediate
+          dbt_task:
+            project_directory: ../dbt_project
+            commands:
+              - dbt run --select tag:marts
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.dbt_schema}
+          environment_key: default
+
+        # ── dbt: tests (declarative data contracts) ─────────────────────────
+        - task_key: dbt_test
+          depends_on:
+            - task_key: dbt_marts
+          dbt_task:
+            project_directory: ../dbt_project
+            commands:
+              - dbt test
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.dbt_schema}
+          environment_key: default
+
+        # ── PySpark alternative: claims_processing.sas → custom ETL ─────────
+        # Runs off the same raw layer as dbt_staging to show the imperative path.
+        - task_key: pyspark_claims_processing
+          depends_on:
+            - task_key: dbt_staging
+          spark_python_task:
+            python_file: ../src/pyspark/claims_processing.py
+            parameters:
+              - "--catalog"
+              - ${var.catalog}
+              - "--schema"
+              - ${var.dbt_schema}
+          environment_key: default
