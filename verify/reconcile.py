@@ -76,6 +76,21 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _rows(self, query: str) -> list:
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
+    def _table_exists(self, fq_table: str) -> bool:
+        try:
+            self._scalar(f"SELECT 1 FROM {fq_table} LIMIT 1")
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -99,9 +114,207 @@ class Reconciler:
             )
         )
 
+    # ---------------------------------------------- claims reconciliation checks
+    def check_claims_completeness(self):
+        """stg_claims row count matches the valid-claims population from raw."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        if not self._table_exists(f"{self.staging}.stg_claims"):
+            self.results.append(
+                CheckResult("claims_completeness", "SKIP",
+                            "stg_claims table not found")
+            )
+            return
+        actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected valid claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_control_total(self):
+        """Total claimed_amount in adjudicated must tie to stg_claims."""
+        if not self._table_exists(f"{self.staging}.stg_claims"):
+            self.results.append(
+                CheckResult("claims_control_total", "SKIP",
+                            "stg_claims table not found")
+            )
+            return
+        if not self._table_exists(f"{self.intermediate}.int_claims_adjudication"):
+            self.results.append(
+                CheckResult("claims_control_total", "SKIP",
+                            "int_claims_adjudication table not found")
+            )
+            return
+        stg_total = self._scalar(
+            f"select round(sum(claimed_amount), 2) from {self.staging}.stg_claims"
+        )
+        adj_total = self._scalar(
+            f"select round(sum(claimed_amount), 2) from {self.intermediate}.int_claims_adjudication"
+        )
+        ok = stg_total == adj_total
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"staging total = {stg_total}, adjudicated total = {adj_total}",
+                {"staging": stg_total, "adjudicated": adj_total},
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Adjudication result distribution matches SAS routing rules."""
+        if not self._table_exists(f"{self.intermediate}.int_claims_adjudication"):
+            self.results.append(
+                CheckResult("claims_adjudication_parity", "SKIP",
+                            "int_claims_adjudication table not found")
+            )
+            return
+        rows = self._rows(
+            f"""
+            select adjudication_result, count(*) as n
+            from {self.intermediate}.int_claims_adjudication
+            group by adjudication_result
+            order by adjudication_result
+            """
+        )
+        dist = {r[0]: r[1] for r in rows}
+        total = sum(dist.values())
+        # Re-derive expected from raw using the same SAS rules
+        expected_rows = self._rows(
+            f"""
+            with base as (
+                select
+                    c.claim_id,
+                    c.claimed_amount,
+                    p.policy_type,
+                    p.sum_insured,
+                    case
+                        when coalesce(f.fraud_score, 0) >= 80 then 'HIGH'
+                        when coalesce(f.fraud_score, 0) >= 50 then 'MEDIUM'
+                        else 'LOW'
+                    end as fraud_risk
+                from {self.raw}.claims c
+                inner join {self.raw}.policies p on c.policy_id = p.policy_id
+                left join {self.raw}.fraud_indicators f on c.claim_id = f.claim_id
+                where p.policy_status = 'ACTIVE'
+                  and c.loss_date >= p.effective_date
+                  and c.loss_date <= p.expiry_date
+                  and c.claimed_amount <= p.sum_insured
+            )
+            select
+                case
+                    when fraud_risk = 'HIGH' then 'DENY'
+                    when fraud_risk = 'LOW' and claimed_amount <= 5000
+                         and policy_type in ('AUTO','HOME','RENT') then 'APPR'
+                    when fraud_risk = 'LOW' and claimed_amount <= sum_insured * 0.25
+                         and claimed_amount <= 50000 then 'APPR'
+                    else 'PEND'
+                end as expected_result,
+                count(*) as n
+            from base
+            group by 1
+            order by 1
+            """
+        )
+        expected_dist = {r[0]: r[1] for r in expected_rows}
+        ok = dist == expected_dist
+        detail_parts = []
+        for k in sorted(set(list(dist.keys()) + list(expected_dist.keys()))):
+            detail_parts.append(f"{k}: actual={dist.get(k, 0)}, expected={expected_dist.get(k, 0)}")
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"total={total}; " + "; ".join(detail_parts),
+                {"actual": dist, "expected": expected_dist},
+            )
+        )
+
+    def check_claims_cross_engine(self):
+        """PySpark curated outputs are referentially consistent with dbt models."""
+        curated_table = f"{self.curated}.claims_register"
+        if not self._table_exists(curated_table):
+            self.results.append(
+                CheckResult("claims_cross_engine", "SKIP",
+                            "curated claims_register not found (run PySpark job first)")
+            )
+            return
+        if not self._table_exists(f"{self.intermediate}.int_claims_adjudication"):
+            self.results.append(
+                CheckResult("claims_cross_engine", "SKIP",
+                            "int_claims_adjudication not found")
+            )
+            return
+
+        # Check 1: curated row count matches dbt
+        dbt_count = self._scalar(
+            f"select count(*) from {self.intermediate}.int_claims_adjudication"
+        )
+        curated_count = self._scalar(
+            f"select count(*) from {curated_table}"
+        )
+        count_ok = dbt_count == curated_count
+
+        # Check 2: every curated claim_id exists in dbt
+        orphans = self._scalar(
+            f"""
+            select count(*)
+            from {curated_table} cr
+            left join {self.intermediate}.int_claims_adjudication adj
+                on cr.claim_id = adj.claim_id
+            where adj.claim_id is null
+            """
+        )
+        ref_ok = orphans == 0
+
+        # Check 3: adjudication results match between engines
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {curated_table} cr
+            inner join {self.intermediate}.int_claims_adjudication adj
+                on cr.claim_id = adj.claim_id
+            where cr.adjudication_result <> adj.adjudication_result
+            """
+        )
+        result_ok = mismatches == 0
+
+        ok = count_ok and ref_ok and result_ok
+        detail = (
+            f"dbt rows={dbt_count}, curated rows={curated_count}, "
+            f"orphans={orphans}, result mismatches={mismatches}"
+        )
+        self.results.append(
+            CheckResult(
+                "claims_cross_engine",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"dbt_count": dbt_count, "curated_count": curated_count,
+                 "orphans": orphans, "mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_control_total()
+        self.check_claims_adjudication_parity()
+        self.check_claims_cross_engine()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
