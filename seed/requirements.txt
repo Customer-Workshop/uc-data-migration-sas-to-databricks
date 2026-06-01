@@ -1,0 +1,4 @@
+# Dependencies for the synthetic data seeder + teardown scripts.
+#   pip install -r seed/requirements.txt
+databricks-sql-connector>=4.0,<5.0
+faker>=40,<41

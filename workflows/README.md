@@ -46,7 +46,7 @@ Databricks Workflow Engine
   ├── dbt_intermediate (depends on staging)
   ├── dbt_marts        (depends on intermediate)
   └── dbt_test         (depends on marts)
-  
+
   On failure → email + PagerDuty webhook
   Repair Run → re-execute from failed task only
 ```

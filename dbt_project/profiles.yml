@@ -6,7 +6,9 @@ databricks:
     dev:
       type: databricks
       catalog: banking_analytics
-      schema: dev
+      # Namespace prefix for outputs. Override per run/attendee for isolated,
+      # concurrent demo spaces, e.g. DBT_SCHEMA=alice -> alice_staging/_marts/...
+      schema: "{{ env_var('DBT_SCHEMA', 'dev') }}"
       host: "{{ env_var('DATABRICKS_HOST') }}"
       http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
       token: "{{ env_var('DATABRICKS_TOKEN') }}"
