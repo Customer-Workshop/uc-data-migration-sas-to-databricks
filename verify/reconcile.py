@@ -150,7 +150,7 @@ class Reconciler:
             CheckResult(
                 "loss_ratio_control_total",
                 "PASS" if ok else "FAIL",
-                f"earned premium int = {int_earned:,.2f} vs mart = {mart_earned:,.2f}; "
+                f"earned premium int = {int_earned or 0:,.2f} vs mart = {mart_earned or 0:,.2f}; "
                 f"policies int = {int_n} vs mart = {mart_n}",
                 {"int_earned": int_earned, "mart_earned": mart_earned},
             )
