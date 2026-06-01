@@ -57,7 +57,8 @@ with interest_income as (
 fee_income as (
     /* SAS Step 2: PROC SQL from CURATED.DAILY_TRANSACTIONS
        where TRANSACTION_DATE between month_start and month_end.
-       In dbt, stg_daily_transactions lacks customer_id; joined via accounts. */
+       In dbt, stg_daily_transactions lacks customer_id; joined via accounts.
+       Date filter uses prev_ym (YYYYMM) to restrict to the reporting month. */
     select
         acct.customer_id,
         sum(
@@ -79,6 +80,10 @@ fee_income as (
     from {{ ref('stg_daily_transactions') }} t
     inner join {{ ref('int_account_metrics') }} acct
         on t.account_id = acct.account_id
+    where t.transaction_date
+        >= to_date('{{ var("prev_ym") }}' || '01', 'yyyyMMdd')
+        and t.transaction_date
+        < add_months(to_date('{{ var("prev_ym") }}' || '01', 'yyyyMMdd'), 1)
     group by acct.customer_id
 ),
 
