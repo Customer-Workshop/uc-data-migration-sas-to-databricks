@@ -100,9 +100,62 @@ class Reconciler:
             )
         )
 
+    def check_customer_pnl_completeness(self):
+        """mart_customer_pnl must have one row per in-scope customer."""
+        expected = self._scalar(
+            f"""
+            select count(distinct a.customer_id)
+            from {self.raw}.cust_accounts a
+            inner join {self.raw}.cust_demographics d on a.customer_id = d.customer_id
+            where a.account_status not in ('W', 'C')
+              and a.open_date <= current_date()
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_customer_pnl")
+        distinct = self._scalar(
+            f"select count(distinct customer_id) from {self.marts}.mart_customer_pnl"
+        )
+        ok = expected == actual == distinct
+        self.results.append(
+            CheckResult(
+                "customer_pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope customers = {expected}, mart rows = {actual}, "
+                f"distinct customers = {distinct}",
+                {"expected": expected, "actual": actual, "distinct": distinct},
+            )
+        )
+
+    def check_customer_pnl_control_total(self):
+        """Sum of TOTAL_RELATIONSHIP must tie to source CURRENT_BALANCE."""
+        expected = self._scalar(
+            f"""
+            select coalesce(sum(a.current_balance), 0)
+            from {self.raw}.cust_accounts a
+            inner join {self.raw}.cust_demographics d on a.customer_id = d.customer_id
+            where a.account_status not in ('W', 'C')
+              and a.open_date <= current_date()
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(total_relationship), 0) from {self.marts}.mart_customer_pnl"
+        )
+        ok = abs(float(expected) - float(actual)) <= 0.01
+        self.results.append(
+            CheckResult(
+                "customer_pnl_control_total",
+                "PASS" if ok else "FAIL",
+                f"source relationship balance = {expected:,.2f}, "
+                f"mart total_relationship = {actual:,.2f}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_customer_pnl_completeness()
+        self.check_customer_pnl_control_total()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
