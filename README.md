@@ -13,10 +13,38 @@ Target-state dbt project for migrating SAS analytics programs to dbt + Databrick
 │   ├── macros/                   # PROC FORMAT → dbt Jinja macros
 │   ├── dbt_project.yml           # Project config with Databricks profile
 │   └── profiles.yml              # Databricks connection config (env-var-based)
+├── verify/                       # Source→target reconciliation report (reconcile.py)
+├── .workshop/
+│   └── playbooks/                # Devin Playbook source — copied into the Devin org
+├── .agents/skills/               # Repo Skill: how to convert/verify in this repo
 ├── docs/
 │   └── SAS_TO_DBT_MIGRATION_MAP.md  # Complete SAS→dbt construct mapping
 └── README.md
 ```
+
+## Conversion Playbook & Skill
+
+The reusable SAS→Databricks **conversion procedure** is a [Devin Playbook](https://docs.devin.ai/product-guides/creating-playbooks). Its source lives in this repo at:
+
+```
+.workshop/playbooks/sas-to-databricks-conversion.devin.md
+```
+
+**Facilitator / demo presenter:** before running, copy that file's contents into your Devin organization (Settings → Playbooks → *Create a new Playbook*) so sessions can invoke it as `!convert-sas-to-databricks`. The playbook is intentionally portable (the general procedure, the source-parity principle, forbidden actions); it is not auto-loaded from the repo — registering it in the org is what makes it available across sessions.
+
+The repo-specific mechanics (the `make demo-up` / `make reconcile` commands, namespaces, and where reconciliation controls live) are kept in a [Skill](https://docs.devin.ai/product-guides/skills) at `.agents/skills/sas-to-databricks-conversion/SKILL.md`, which Devin **auto-discovers and loads** when working in this repo — supplementing the general playbook with the how-to for this codebase.
+
+### The `.workshop/` paradigm
+
+`.workshop/` is a convention directory for **demo-authoring assets** that are not application code and are not auto-loaded by Devin. Today it holds `playbooks/` — portable Devin Playbook sources (`*.devin.md`) that a facilitator copies into a Devin org so sessions can invoke them by `!macro`. This sits alongside two siblings, with a clean boundary between them:
+
+| Artifact | Location | Loading | Scope |
+|---|---|---|---|
+| **Playbook** | `.workshop/playbooks/*.devin.md` | copied into the org by the facilitator; invoked via `!macro` | portable, general procedure |
+| **Skill** | `.agents/skills/<name>/SKILL.md` | auto-loaded by Devin in this repo | repo-specific mechanics |
+| **Presenter thread** | `workshop-metadata/demos/…` | read by the presenter | the single linear demo script |
+
+The full convention — and a playbook for authoring new demos this way — lives in the [operator](https://github.com/Cognition-Partner-Workshops/operator) repo under `.workshop/playbooks/`.
 
 ## Program-Level Migration Map
 
