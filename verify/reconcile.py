@@ -99,9 +99,105 @@ class Reconciler:
             )
         )
 
+    # ---------------------------------------------- customer P&L checks
+    def check_pnl_completeness(self):
+        """mart_customer_pnl row count = distinct customers from staging accounts."""
+        expected = self._scalar(
+            f"select count(distinct customer_id) from {self.staging}.stg_cust_accounts"
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.marts}.mart_customer_pnl"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected customers = {expected}, mart rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_pnl_revenue_control_total(self):
+        """Total revenue must equal net_interest_income + fee_income."""
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"""
+                select
+                    sum(total_revenue) as mart_rev,
+                    sum(net_interest_income) + sum(fee_income) as recomputed_rev
+                from {self.marts}.mart_customer_pnl
+                """
+            )
+            row = cur.fetchone()
+        finally:
+            cur.close()
+        mart_rev, recomp = row[0], row[1]
+        diff = abs(mart_rev - recomp) if mart_rev is not None and recomp is not None else None
+        ok = diff is not None and diff <= 1.0
+        self.results.append(
+            CheckResult(
+                "pnl_revenue_control_total",
+                "PASS" if ok else "FAIL",
+                f"mart revenue = {mart_rev}, recomputed = {recomp}, diff = {diff}",
+                {"mart_rev": mart_rev, "recomputed_rev": recomp, "diff": diff},
+            )
+        )
+
+    def check_pnl_account_type_coverage(self):
+        """Every account_type must map to lending or deposit bucket."""
+        unmapped = self._scalar(
+            f"""
+            select count(*)
+            from {self.staging}.stg_cust_accounts
+            where account_type not in (
+                'MTG','AUTO','PERS','CC','LOC','HELC',
+                'CHK','SAV','MMA','CD','IRA'
+            )
+            """
+        )
+        ok = unmapped == 0
+        self.results.append(
+            CheckResult(
+                "pnl_account_type_coverage",
+                "PASS" if ok else "FAIL",
+                f"unmapped account_type rows = {unmapped}",
+                {"unmapped": unmapped},
+            )
+        )
+
+    def check_pnl_profit_tier_parity(self):
+        """Stored profit_tier must match re-derived tier from net_profit."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_customer_pnl
+            where profit_tier <> case
+                when net_profit >= 500 then 'Highly Profitable'
+                when net_profit >= 100 then 'Profitable'
+                when net_profit >= 0   then 'Marginal'
+                else 'Unprofitable'
+            end
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "pnl_profit_tier_parity",
+                "PASS" if ok else "FAIL",
+                f"tier mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_pnl_completeness()
+        self.check_pnl_revenue_control_total()
+        self.check_pnl_account_type_coverage()
+        self.check_pnl_profit_tier_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
