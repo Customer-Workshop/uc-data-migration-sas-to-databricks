@@ -70,9 +70,10 @@ fee_income as (
     /*
       SAS Step 2: Fee Income from Transactions
       Source: CURATED.DAILY_TRANSACTIONS filtered to reporting month
-      dbt:   source('banking_raw', 'daily_transactions') joined to
-             stg_cust_accounts for customer_id (raw txns have account_id only;
-             the SAS CURATED table was pre-enriched with customer_id)
+      dbt:   ref('stg_daily_transactions') joined to stg_cust_accounts for
+             customer_id (raw txns have account_id only; the SAS CURATED table
+             was pre-enriched with customer_id). Uses the staging model to
+             mirror the SAS CURATED source (post-validation, filtered).
     */
     select
         acct.customer_id,
@@ -89,7 +90,7 @@ fee_income as (
             end
         ) as int_credited,
         count(*) as txn_volume
-    from {{ source('banking_raw', 'daily_transactions') }} t
+    from {{ ref('stg_daily_transactions') }} t
     inner join {{ ref('stg_cust_accounts') }} acct
         on t.account_id = acct.account_id
     where
@@ -105,7 +106,10 @@ ecl as (
       SAS Step 3: Expected Credit Loss by Customer
       Source: CURATED.RISK_SCORES — latest score_date <= month end
       dbt:   ref('mart_risk_scores') — score_date = current_date()
-      Adapted: use max(score_date) from mart_risk_scores as the SAS subquery did
+      Adapted: mart_risk_scores always stamps score_date = current_date(),
+      so the SAS filter (score_date <= month_end) would exclude all rows
+      when report_month = prev_ym. Use max(score_date) unconditionally to
+      get the latest available scores (matches the SAS intent).
     */
     select
         r.customer_id,
@@ -114,9 +118,6 @@ ecl as (
     where r.score_date = (
         select max(score_date)
         from {{ ref('mart_risk_scores') }}
-        where score_date <= last_day(
-            to_date('{{ report_month }}' || '01', 'yyyyMMdd')
-        )
     )
     group by r.customer_id
 ),
