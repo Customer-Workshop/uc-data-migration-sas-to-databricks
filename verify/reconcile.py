@@ -300,7 +300,13 @@ class Reconciler:
             )
         }
         bad = []
-        for key in sorted(set(expected) | set(actual)):
+        # region_code may be NULL -> None; sort NULL-safely so mixed None/str
+        # tuples don't raise TypeError in Python 3 (mirrors the <=> join in the
+        # dbt parity test).
+        for key in sorted(
+            set(expected) | set(actual),
+            key=lambda k: tuple("" if x is None else x for x in k),
+        ):
             e, a = expected.get(key, 0), actual.get(key, 0)
             if e != a:
                 bad.append(f"{key[0]}/{key[1]}/{key[2]}: expected {e}, actual {a}")
