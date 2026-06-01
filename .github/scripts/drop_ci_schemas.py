@@ -35,10 +35,12 @@ def main() -> int:
         access_token=os.environ["DATABRICKS_TOKEN"],
     )
     cur = con.cursor()
+    # Match on a literal prefix (startswith), not LIKE: `_` is a LIKE wildcard,
+    # so `ci_<id>_1%` would also match attempt 10's schemas (`ci_<id>_10_*`).
     cur.execute(
         "select schema_name from {}.information_schema.schemata "
-        "where schema_name like ?".format(args.catalog),
-        [f"{args.prefix}%"],
+        "where startswith(schema_name, ?)".format(args.catalog),
+        [f"{args.prefix}_"],
     )
     schemas = [r[0] for r in cur.fetchall()]
     if not schemas:
