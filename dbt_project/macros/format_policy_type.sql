@@ -17,6 +17,9 @@ case {{ column }}
     when 'VIS'   then 'Vision'
     when 'DISAB' then 'Disability'
     when 'LTCI'  then 'Long-Term Care'
+    when 'LIFE'  then 'Life Insurance'
+    when 'HEALTH' then 'Health Insurance'
+    when 'COMMERCIAL' then 'Commercial'
     else 'Unknown'
 end
 {% endmacro %}
