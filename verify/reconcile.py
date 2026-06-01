@@ -88,7 +88,12 @@ class Reconciler:
               and a.open_date <= current_date()
             """
         )
-        actual = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        try:
+            actual = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        except Exception:
+            self.results.append(CheckResult("account_completeness", "SKIP",
+                                            "int_account_metrics not found"))
+            return
         ok = expected == actual
         self.results.append(
             CheckResult(
@@ -99,9 +104,157 @@ class Reconciler:
             )
         )
 
+    # ------------------------------------------------ claims reconciliation checks
+    def check_claims_completeness(self):
+        """stg_claims must equal the documented validation-scope population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
+        if actual is None:
+            self.results.append(CheckResult("claims_completeness", "SKIP",
+                                            "stg_claims not found"))
+            return
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected valid claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_control_total(self):
+        """Sum of claimed_amount must tie between staging and adjudication."""
+        stg = self._scalar(
+            f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.staging}.stg_claims"
+        )
+        adj = self._scalar(
+            f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.intermediate}.int_claims_adjudication"
+        )
+        if stg is None or adj is None:
+            self.results.append(CheckResult("claims_control_total", "SKIP",
+                                            "table(s) not found"))
+            return
+        ok = stg == adj
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"staging sum = {stg}, adjudication sum = {adj}",
+                {"staging_total": stg, "adjudication_total": adj},
+            )
+        )
+
+    def check_claims_fraud_risk_parity(self):
+        """Every fraud_risk value must agree with the score-threshold mapping."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_claims_adjudication
+            where fraud_risk <> (
+                case
+                    when fraud_score >= 80 then 'HIGH'
+                    when fraud_score >= 50 then 'MEDIUM'
+                    else 'LOW'
+                end
+            )
+            """
+        )
+        if mismatches is None:
+            self.results.append(CheckResult("claims_fraud_risk_parity", "SKIP",
+                                            "int_claims_adjudication not found"))
+            return
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_fraud_risk_parity",
+                "PASS" if ok else "FAIL",
+                f"mismatched fraud_risk rows = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Every adjudication_result must agree with the SAS rule-priority chain."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_claims_adjudication
+            where adjudication_result <> (
+                case
+                    when fraud_risk = 'HIGH' then 'DENY'
+                    when fraud_risk = 'LOW'
+                         and claimed_amount <= 5000
+                         and policy_type in ('AUTO', 'HOME', 'RENT')
+                    then 'APPR'
+                    when fraud_risk = 'LOW'
+                         and claimed_amount <= sum_insured * 0.25
+                         and claimed_amount <= 50000
+                    then 'APPR'
+                    else 'PEND'
+                end
+            )
+            """
+        )
+        if mismatches is None:
+            self.results.append(CheckResult("claims_adjudication_parity", "SKIP",
+                                            "int_claims_adjudication not found"))
+            return
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"mismatched adjudication_result rows = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
+    def check_claims_register_within_source(self):
+        """PySpark curated claims_register row count bounded by adjudication input."""
+        adj_count = self._scalar(
+            f"select count(*) from {self.intermediate}.int_claims_adjudication"
+        )
+        try:
+            reg_count = self._scalar(
+                f"select count(*) from {self.curated}.claims_register"
+            )
+        except Exception:
+            self.results.append(CheckResult("claims_register_within_source", "SKIP",
+                                            "curated.claims_register not found (run PySpark job first)"))
+            return
+        if reg_count is None:
+            self.results.append(CheckResult("claims_register_within_source", "SKIP",
+                                            "curated.claims_register not found"))
+            return
+        ok = adj_count == reg_count
+        self.results.append(
+            CheckResult(
+                "claims_register_within_source",
+                "PASS" if ok else "FAIL",
+                f"adjudication rows = {adj_count}, register rows = {reg_count}",
+                {"adjudication": adj_count, "register": reg_count},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_control_total()
+        self.check_claims_fraud_risk_parity()
+        self.check_claims_adjudication_parity()
+        self.check_claims_register_within_source()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 

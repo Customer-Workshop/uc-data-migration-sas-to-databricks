@@ -197,21 +197,30 @@ def generate_insurance(policies_n: int, seed: int, customers_hint: int = 200):
         })
         if rnd.random() < 0.4:
             cid = f"CLM{p:06d}"
+            claimant = f"CUST{rnd.randint(1, customers_hint):06d}"
             loss = eff + dt.timedelta(days=rnd.randint(1, 360))
             claims.append({
                 "claim_id": cid,
                 "policy_id": pid,
-                "claimant_id": f"CUST{rnd.randint(1, customers_hint):06d}",
+                "claimant_id": claimant,
                 "claim_type": rnd.choice(CLAIM_TYPES),
                 "claim_status": rnd.choice(CLAIM_STATUSES),
                 "claimed_amount": round(min(sum_insured, rnd.uniform(500, sum_insured)), 2),
                 "loss_date": loss,
                 "reported_date": loss + dt.timedelta(days=rnd.randint(0, 30)),
             })
+            # fraud_indicators keyed by policy_id + claimant_id (SAS: TERA_DW.FRAUD_INDICATORS)
+            fscore = int(rnd.triangular(0, 100, 30))
+            flags = ";".join(rnd.sample(
+                ["VELOCITY", "GEO_MISMATCH", "REPEAT_CLAIMANT", "HIGH_SEVERITY",
+                 "STAGED_LOSS", "LATE_REPORT", "DOC_INCONSISTENCY"],
+                k=rnd.randint(0, 3),
+            ))
             fraud.append({
-                "claim_id": cid,
-                "fraud_score": round(rnd.uniform(0, 1), 4),
-                "model_version": "v2.3",
+                "policy_id": pid,
+                "claimant_id": claimant,
+                "fraud_score": fscore,
+                "indicator_flags": flags,
             })
 
     return {
@@ -270,7 +279,8 @@ SCHEMAS = {
         "loss_date": "DATE", "reported_date": "DATE",
     },
     "fraud_indicators": {
-        "claim_id": "STRING", "fraud_score": "DOUBLE", "model_version": "STRING",
+        "policy_id": "STRING", "claimant_id": "STRING", "fraud_score": "INT",
+        "indicator_flags": "STRING",
     },
 }
 
