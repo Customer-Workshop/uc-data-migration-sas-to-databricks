@@ -13,10 +13,26 @@ Target-state dbt project for migrating SAS analytics programs to dbt + Databrick
 │   ├── macros/                   # PROC FORMAT → dbt Jinja macros
 │   ├── dbt_project.yml           # Project config with Databricks profile
 │   └── profiles.yml              # Databricks connection config (env-var-based)
+├── verify/                       # Source→target reconciliation report (reconcile.py)
+├── .workshop/
+│   └── playbooks/                # Devin Playbook source — copied into the Devin org
+├── .agents/skills/               # Repo Skill: how to convert/verify in this repo
 ├── docs/
 │   └── SAS_TO_DBT_MIGRATION_MAP.md  # Complete SAS→dbt construct mapping
 └── README.md
 ```
+
+## Conversion Playbook & Skill
+
+The reusable SAS→Databricks **conversion procedure** is a [Devin Playbook](https://docs.devin.ai/product-guides/creating-playbooks). Its source lives in this repo at:
+
+```
+.workshop/playbooks/sas-to-databricks-conversion.devin.md
+```
+
+**Facilitator / demo presenter:** before running, copy that file's contents into your Devin organization (Settings → Playbooks → *Create a new Playbook*) so sessions can invoke it as `!convert-sas-to-databricks`. The playbook is intentionally portable (the general procedure, the source-parity principle, forbidden actions); it is not auto-loaded from the repo — registering it in the org is what makes it available across sessions.
+
+The repo-specific mechanics (the `make demo-up` / `make reconcile` commands, namespaces, and where reconciliation controls live) are kept in a [Skill](https://docs.devin.ai/product-guides/skills) at `.agents/skills/sas-to-databricks-conversion/SKILL.md`, which Devin **auto-discovers and loads** when working in this repo — supplementing the general playbook with the how-to for this codebase.
 
 ## Program-Level Migration Map
 
