@@ -100,9 +100,91 @@ class Reconciler:
             )
         )
 
+    # ---------------------------------------------- customer P&L checks
+    def check_customer_pnl_completeness(self):
+        """One P&L row per customer that has at least one in-scope account."""
+        expected = self._scalar(
+            f"select count(distinct customer_id) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.marts}.mart_customer_pnl"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "customer_pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected customers = {expected}, model rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_customer_pnl_control_total(self):
+        """Total revenue in the mart must tie to independently computed NII + fees."""
+        nii = self._scalar(
+            f"""
+            select
+                sum(case when account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+                    then current_balance * interest_rate / 12 else 0 end)
+              - sum(case when account_type in ('CHK','SAV','MMA','CD','IRA')
+                    then current_balance * interest_rate / 12 else 0 end)
+            from {self.intermediate}.int_account_metrics
+            """
+        )
+        fees = self._scalar(
+            f"""
+            select sum(case when t.transaction_type = 'FEE'
+                then abs(t.transaction_amount) else 0 end)
+            from {self.marts}.mart_daily_transactions t
+            inner join (select distinct customer_id from {self.intermediate}.int_account_metrics) c
+                on t.customer_id = c.customer_id
+            """
+        )
+        expected = (nii or 0) + (fees or 0)
+        actual = self._scalar(
+            f"select sum(total_revenue) from {self.marts}.mart_customer_pnl"
+        ) or 0
+        ok = abs(actual - expected) <= 0.01
+        self.results.append(
+            CheckResult(
+                "customer_pnl_control_total",
+                "PASS" if ok else "FAIL",
+                f"expected total_revenue = {expected:.2f}, model = {actual:.2f}, "
+                f"diff = {abs(actual - expected):.4f}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_customer_pnl_profit_tier_parity(self):
+        """Every row's profit_tier must match the SAS threshold mapping."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_customer_pnl
+            where profit_tier <> case
+                when net_profit >= 500 then 'Highly Profitable'
+                when net_profit >= 100 then 'Profitable'
+                when net_profit >= 0   then 'Marginal'
+                else 'Unprofitable'
+            end
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "customer_pnl_profit_tier_parity",
+                "PASS" if ok else "FAIL",
+                f"rows with tier mismatch = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_customer_pnl_completeness()
+        self.check_customer_pnl_control_total()
+        self.check_customer_pnl_profit_tier_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
