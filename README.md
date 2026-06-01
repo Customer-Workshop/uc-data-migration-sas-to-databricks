@@ -34,6 +34,18 @@ The reusable SAS→Databricks **conversion procedure** is a [Devin Playbook](htt
 
 The repo-specific mechanics (the `make demo-up` / `make reconcile` commands, namespaces, and where reconciliation controls live) are kept in a [Skill](https://docs.devin.ai/product-guides/skills) at `.agents/skills/sas-to-databricks-conversion/SKILL.md`, which Devin **auto-discovers and loads** when working in this repo — supplementing the general playbook with the how-to for this codebase.
 
+### The `.workshop/` paradigm
+
+`.workshop/` is a convention directory for **demo-authoring assets** that are not application code and are not auto-loaded by Devin. Today it holds `playbooks/` — portable Devin Playbook sources (`*.devin.md`) that a facilitator copies into a Devin org so sessions can invoke them by `!macro`. This sits alongside two siblings, with a clean boundary between them:
+
+| Artifact | Location | Loading | Scope |
+|---|---|---|---|
+| **Playbook** | `.workshop/playbooks/*.devin.md` | copied into the org by the facilitator; invoked via `!macro` | portable, general procedure |
+| **Skill** | `.agents/skills/<name>/SKILL.md` | auto-loaded by Devin in this repo | repo-specific mechanics |
+| **Presenter thread** | `workshop-metadata/demos/…` | read by the presenter | the single linear demo script |
+
+The full convention — and a playbook for authoring new demos this way — lives in the [operator](https://github.com/Cognition-Partner-Workshops/operator) repo under `.workshop/playbooks/`.
+
 ## Program-Level Migration Map
 
 | SAS Source Program | dbt Model(s) | Migration Pattern |
