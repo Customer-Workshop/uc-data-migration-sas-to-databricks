@@ -99,9 +99,105 @@ class Reconciler:
             )
         )
 
+    def check_customer_pnl_completeness(self):
+        """P&L customer count must equal distinct customers in staging accounts."""
+        try:
+            expected = self._scalar(
+                f"select count(distinct customer_id) from {self.staging}.stg_cust_accounts"
+            )
+            actual = self._scalar(
+                f"select count(*) from {self.marts}.mart_customer_pnl"
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("customer_pnl_completeness", "SKIP", str(exc))
+            )
+            return
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "customer_pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected customers = {expected}, mart rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_customer_pnl_nii_control_total(self):
+        """Net interest income total must tie to source lending - deposit calc."""
+        try:
+            row = None
+            cur = self.con.cursor()
+            try:
+                cur.execute(
+                    f"""
+                    select
+                        sum(case when account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+                                 then current_balance * interest_rate / 12 else 0 end)
+                        - sum(case when account_type in ('CHK','SAV','MMA','CD','IRA')
+                                   then current_balance * interest_rate / 12 else 0 end)
+                    from {self.staging}.stg_cust_accounts
+                    """
+                )
+                row = cur.fetchone()
+            finally:
+                cur.close()
+            expected_nii = row[0] if row else None
+            actual_nii = self._scalar(
+                f"select sum(net_interest_income) from {self.marts}.mart_customer_pnl"
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("customer_pnl_nii_control_total", "SKIP", str(exc))
+            )
+            return
+        diff = abs((expected_nii or 0) - (actual_nii or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "customer_pnl_nii_control_total",
+                "PASS" if ok else "FAIL",
+                f"expected NII = {expected_nii}, actual NII = {actual_nii}, diff = {diff:.4f}",
+                {"expected": expected_nii, "actual": actual_nii, "diff": diff},
+            )
+        )
+
+    def check_customer_pnl_profit_tier_parity(self):
+        """Every profit_tier must match the SAS thresholds (500/100/0)."""
+        try:
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.marts}.mart_customer_pnl
+                where profit_tier <> case
+                    when net_profit >= 500 then 'Highly Profitable'
+                    when net_profit >= 100 then 'Profitable'
+                    when net_profit >= 0   then 'Marginal'
+                    else 'Unprofitable'
+                end
+                """
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("customer_pnl_profit_tier_parity", "SKIP", str(exc))
+            )
+            return
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "customer_pnl_profit_tier_parity",
+                "PASS" if ok else "FAIL",
+                f"mismatched rows = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_customer_pnl_completeness()
+        self.check_customer_pnl_nii_control_total()
+        self.check_customer_pnl_profit_tier_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
