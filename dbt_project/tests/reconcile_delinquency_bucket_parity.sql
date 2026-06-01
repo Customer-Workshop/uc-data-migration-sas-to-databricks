@@ -74,9 +74,11 @@ select
     m.n_actual
 from expected_summary e
 full outer join mart_summary m
-    on e.account_type = m.account_type
-    and e.region_code = m.region_code
-    and e.bucket = m.bucket
+    -- Null-safe equality: region_code may be NULL, and `NULL = NULL` is NULL
+    -- (not TRUE), which would leave matched groups unmatched -> false failure.
+    on e.account_type <=> m.account_type
+    and e.region_code <=> m.region_code
+    and e.bucket <=> m.bucket
 where e.account_type is null
    or m.account_type is null
    or coalesce(e.n_expected, -1) <> coalesce(m.n_actual, -1)
