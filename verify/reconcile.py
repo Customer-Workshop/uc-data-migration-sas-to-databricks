@@ -76,6 +76,14 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _rows(self, query: str) -> list[tuple]:
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -99,9 +107,147 @@ class Reconciler:
             )
         )
 
+    # ── monthly_regulatory_reporting.sas — RWA controls ─────────────────
+    def check_rwa_completeness(self):
+        """mart_regulatory_rwa account count must match int_account_metrics."""
+        expected = self._scalar(
+            f"select count(*) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"source accounts = {expected}, mart accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_control_total(self):
+        """Sum of total_exposure must match sum of current_balance in source."""
+        expected = self._scalar(
+            f"select coalesce(sum(current_balance), 0) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(total_exposure), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        diff = abs(float(actual or 0) - float(expected or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_control_total",
+                "PASS" if ok else "FAIL",
+                f"source balance = {expected}, mart total_exposure = {actual}, diff = {diff:.2f}",
+                {"expected": expected, "actual": actual, "diff": diff},
+            )
+        )
+
+    def check_rwa_risk_weight_parity(self):
+        """Every account_type must carry the weight prescribed by the SAS CASE."""
+        # The SAS mapping (source of truth) — per-type expected weights.
+        # MTG has two bands (LTV split), so we check the mart carries only
+        # 0.35 and/or 0.50 for MTG and the correct scalar for every other type.
+        sas_weights = {
+            "CHK": {0.00}, "SAV": {0.00}, "MMA": {0.00}, "CD": {0.00},
+            "MTG": {0.35, 0.50}, "HELC": {0.50},
+            "AUTO": {0.75}, "PERS": {0.75}, "CC": {0.75},
+            "LOC": {1.00}, "IRA": {1.00},
+        }
+        rows = self._rows(
+            f"select distinct account_type, risk_weight from {self.marts}.mart_regulatory_rwa"
+        )
+        bad = []
+        for acct_type, rw in rows:
+            allowed = sas_weights.get(acct_type, {1.00})  # unknown -> else 1.00
+            if round(float(rw), 2) not in {round(w, 2) for w in allowed}:
+                bad.append(f"{acct_type} actual {rw}, expected one of {allowed}")
+        ok = len(bad) == 0
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                "; ".join(bad) if bad else "all account_type weights match SAS mapping",
+                {"mismatches": bad},
+            )
+        )
+
+    # ── monthly_regulatory_reporting.sas — delinquency controls ────────
+    def check_delinquency_completeness(self):
+        """mart_delinquency_aging account count must match credit-product population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"credit-product accounts = {expected}, mart accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_delinquency_control_total(self):
+        """Sum of total_balance must match sum of balances for credit products."""
+        expected = self._scalar(
+            f"""
+            select coalesce(sum(current_balance), 0)
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(total_balance), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        diff = abs(float(actual or 0) - float(expected or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "delinquency_control_total",
+                "PASS" if ok else "FAIL",
+                f"source balance = {expected}, mart total_balance = {actual}, diff = {diff:.2f}",
+                {"expected": expected, "actual": actual, "diff": diff},
+            )
+        )
+
+    def check_delinquency_bucket_parity(self):
+        """Every delinq_bucket value must be in the SAS-defined set."""
+        valid = {'Current', '1-29', '30-59', '60-89', '90-119', '120-179', '180+', 'Unknown'}
+        rows = self._rows(
+            f"select distinct delinq_bucket from {self.marts}.mart_delinquency_aging"
+        )
+        actual = {r[0] for r in rows}
+        invalid = actual - valid
+        ok = len(invalid) == 0
+        self.results.append(
+            CheckResult(
+                "delinquency_bucket_parity",
+                "PASS" if ok else "FAIL",
+                f"invalid buckets: {invalid}" if invalid else "all buckets match SAS mapping",
+                {"invalid": list(invalid)},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        # monthly_regulatory_reporting.sas controls
+        self.check_rwa_completeness()
+        self.check_rwa_control_total()
+        self.check_rwa_risk_weight_parity()
+        self.check_delinquency_completeness()
+        self.check_delinquency_control_total()
+        self.check_delinquency_bucket_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
