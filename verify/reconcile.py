@@ -99,9 +99,111 @@ class Reconciler:
             )
         )
 
+    # ---------------------------------------------- insurance: policy valuation
+    def check_policy_valuation_completeness(self):
+        """Model policies must equal the in-scope active raw population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.policies
+            where policy_status = 'ACTIVE'
+              and effective_date <= current_date()
+              and expiry_date >= current_date()
+            """
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_policy_valuation"
+        )
+        if actual is None:
+            self.results.append(
+                CheckResult(
+                    "policy_valuation_completeness", "SKIP",
+                    "int_policy_valuation not built yet",
+                )
+            )
+            return
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "policy_valuation_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope active policies = {expected}, model rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_loss_ratios_earned_premium_total(self):
+        """Total earned premium in mart must tie to intermediate sum."""
+        int_total = self._scalar(
+            f"""
+            select coalesce(sum(ytd_earned_premium), 0)
+            from {self.intermediate}.int_policy_valuation
+            """
+        )
+        mart_total = self._scalar(
+            f"""
+            select coalesce(sum(total_earned), 0)
+            from {self.marts}.mart_loss_ratios
+            """
+        )
+        if int_total is None or mart_total is None:
+            self.results.append(
+                CheckResult(
+                    "loss_ratios_earned_premium_total", "SKIP",
+                    "mart_loss_ratios or int_policy_valuation not built yet",
+                )
+            )
+            return
+        diff = abs(float(int_total) - float(mart_total))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "loss_ratios_earned_premium_total",
+                "PASS" if ok else "FAIL",
+                f"intermediate earned = {int_total}, mart earned = {mart_total}, diff = {diff:.4f}",
+                {"intermediate": float(int_total), "mart": float(mart_total), "diff": diff},
+            )
+        )
+
+    def check_premium_adequate_parity(self):
+        """PREMIUM_ADEQUATE must match its derivation from COMBINED_RATIO."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_policy_valuation
+            where premium_adequate <> (
+                case
+                    when combined_ratio is null then 'N'
+                    when combined_ratio > 1.0 then 'N'
+                    else 'Y'
+                end
+            )
+            """
+        )
+        if mismatches is None:
+            self.results.append(
+                CheckResult(
+                    "premium_adequate_parity", "SKIP",
+                    "int_policy_valuation not built yet",
+                )
+            )
+            return
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "premium_adequate_parity",
+                "PASS" if ok else "FAIL",
+                f"mismatched rows = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_policy_valuation_completeness()
+        self.check_loss_ratios_earned_premium_total()
+        self.check_premium_adequate_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
