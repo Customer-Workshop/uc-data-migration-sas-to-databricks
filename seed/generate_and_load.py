@@ -198,21 +198,42 @@ def generate_insurance(policies_n: int, seed: int, customers_hint: int = 200):
         if rnd.random() < 0.4:
             cid = f"CLM{p:06d}"
             loss = eff + dt.timedelta(days=rnd.randint(1, 360))
+            claimant = f"CUST{rnd.randint(1, customers_hint):06d}"
             claims.append({
                 "claim_id": cid,
                 "policy_id": pid,
-                "claimant_id": f"CUST{rnd.randint(1, customers_hint):06d}",
+                "claimant_id": claimant,
                 "claim_type": rnd.choice(CLAIM_TYPES),
                 "claim_status": rnd.choice(CLAIM_STATUSES),
                 "claimed_amount": round(min(sum_insured, rnd.uniform(500, sum_insured)), 2),
                 "loss_date": loss,
                 "reported_date": loss + dt.timedelta(days=rnd.randint(0, 30)),
             })
-            fraud.append({
-                "claim_id": cid,
-                "fraud_score": round(rnd.uniform(0, 1), 4),
-                "model_version": "v2.3",
-            })
+            # Fraud model output (SAS: TERA_DW.FRAUD_INDICATORS). The SAS
+            # claims_processing.sas program joins this feed on (POLICY_ID,
+            # CLAIMANT_ID) and buckets FRAUD_SCORE with HIGH>=80 / MEDIUM>=50,
+            # i.e. a 0-100 score, and concatenates INDICATOR_FLAGS into SIU
+            # alert reasons. We generate the feed to that contract. ~15% of
+            # claims have no fraud row, so the converted model's LEFT JOIN +
+            # missing->LOW behaviour (SAS treats a missing score as < 50) is
+            # exercised by real data.
+            if rnd.random() < 0.85:
+                fscore = round(rnd.uniform(0, 100), 2)
+                flags = []
+                if fscore >= 80:
+                    flags.append("PRIOR_SIU")
+                if rnd.random() < 0.50:
+                    flags.append("VELOCITY")
+                if rnd.random() < 0.30:
+                    flags.append("GEO_MISMATCH")
+                fraud.append({
+                    "claim_id": cid,
+                    "policy_id": pid,
+                    "claimant_id": claimant,
+                    "fraud_score": fscore,
+                    "indicator_flags": ";".join(flags),
+                    "model_version": "v2.3",
+                })
 
     return {
         "policies": policies,
@@ -270,7 +291,8 @@ SCHEMAS = {
         "loss_date": "DATE", "reported_date": "DATE",
     },
     "fraud_indicators": {
-        "claim_id": "STRING", "fraud_score": "DOUBLE", "model_version": "STRING",
+        "claim_id": "STRING", "policy_id": "STRING", "claimant_id": "STRING",
+        "fraud_score": "DOUBLE", "indicator_flags": "STRING", "model_version": "STRING",
     },
 }
 

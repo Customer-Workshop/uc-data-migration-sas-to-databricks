@@ -37,4 +37,8 @@ sources:
       - name: premiums
         description: "Premium payments (SAS: RAW_INS.PREMIUMS)"
       - name: fraud_indicators
-        description: "Fraud scoring model output (SAS: TERA_DW.FRAUD_INDICATORS)"
+        description: >
+          Fraud scoring model output (SAS: TERA_DW.FRAUD_INDICATORS). Joined by
+          claims_processing.sas on (policy_id, claimant_id); fraud_score is on a
+          0-100 scale (HIGH >= 80, MEDIUM >= 50) and indicator_flags feeds SIU
+          alert reasons. Not every claim has a row (missing score -> LOW).

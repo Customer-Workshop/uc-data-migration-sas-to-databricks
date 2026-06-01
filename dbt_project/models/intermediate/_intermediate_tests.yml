@@ -98,6 +98,16 @@ models:
         data_tests:
           - not_null
 
+      - name: routing_target
+        description: >
+          SAS Step 3 physical routing target. AUTO_ADJUDICATED for APPR;
+          MANUAL_REVIEW for PEND and -- source-faithfully -- for DENY (the SAS
+          high-fraud branch does `output WORK.MANUAL_REVIEW`).
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['AUTO_ADJUDICATED', 'MANUAL_REVIEW']
+
   - name: int_policy_valuation
     description: >
       In-force policy valuation with claims experience, premium collections,
