@@ -34,7 +34,7 @@ Macro variables (&var)      →     dbt vars / env_var()
 | `monthly_regulatory_reporting.sas` | `mart_regulatory_rwa.sql` + `mart_delinquency_aging.sql` | PROC SQL aggregation → SQL GROUP BY; PROC EXPORT → Databricks notebook |
 | `claims_processing.sas` | `stg_claims.sql` → `int_claims_adjudication.sql` | Hash lookup → broadcast join; IF/THEN routing → SQL CASE |
 | `policy_valuation.sas` | `int_policy_valuation.sql` → `mart_loss_ratios.sql` | MERGE BY → SQL JOIN; earned premium calc → SQL date math |
-| `customer_profitability.sas` | `mart_customer_pnl.sql` | Multi-source merge → multi-ref JOIN; tier assignment → CASE |
+| `customer_profitability.sas` | `mart_customer_pnl.sql` → `mart_segment_profitability.sql` + `mart_branch_profitability.sql` | Multi-source MERGE BY → multi-ref LEFT JOIN; SAS sum() → coalesce(); tier assignment → CASE; PROC MEANS → GROUP BY |
 
 ## SAS Construct Migration Details
 
@@ -235,6 +235,10 @@ stg_cust_accounts ──→ int_account_metrics ──→ mart_daily_transaction
                                            └─→ mart_regulatory_reporting
 
 stg_daily_transactions ──→ mart_daily_transactions ──→ mart_transaction_anomalies
+
+int_account_metrics ──→ mart_customer_pnl ──→ mart_segment_profitability
+mart_daily_transactions ──→ mart_customer_pnl ──→ mart_branch_profitability
+mart_risk_scores ──→ mart_customer_pnl
 
 stg_claims ──→ int_claims_adjudication ──→ mart_claims_register
 stg_policies ──→ int_policy_valuation ──→ mart_loss_ratios

@@ -242,3 +242,42 @@ models:
                 - Profitable
                 - Marginal
                 - Unprofitable
+
+  - name: mart_segment_profitability
+    description: >
+      Profitability summary by customer segment. Migrated from
+      customer_profitability.sas (Step 5, PROC MEANS #1).
+    columns:
+      - name: customer_segment
+        data_tests:
+          - unique
+          - not_null
+
+      - name: n_customers
+        data_tests:
+          - not_null
+
+      - name: report_month
+        data_tests:
+          - not_null
+
+  - name: mart_branch_profitability
+    description: >
+      Profitability summary by branch and region. Migrated from
+      customer_profitability.sas (Step 5, PROC MEANS #2).
+    columns:
+      - name: branch_id
+        data_tests:
+          - not_null
+
+      - name: region_code
+        data_tests:
+          - not_null
+
+      - name: n_customers
+        data_tests:
+          - not_null
+
+      - name: report_month
+        data_tests:
+          - not_null
