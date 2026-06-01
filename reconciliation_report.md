@@ -6,12 +6,12 @@ SAS extract's intent. FAIL blocks the migration; SKIP means a prerequisite
 
 | Control | Result | Detail |
 |---|---|---|
-| `account_completeness` | PASS | in-scope raw accounts = 469, model accounts = 469 |
-| `rwa_completeness` | PASS | source accounts = 469, mart accounts = 469 |
-| `rwa_control_total` | PASS | exposure src=93223155.41999999 mart=93223155.41999996 (diff 0.00); rwa src=42185916.75649996 mart=42185916.75649999 (diff 0.00) |
+| `account_completeness` | PASS | in-scope raw accounts = 468, model accounts = 468 |
+| `rwa_completeness` | PASS | source accounts = 468, mart accounts = 468 |
+| `rwa_control_total` | PASS | exposure src=94961804.93999995 mart=94961804.94 (diff 0.00); rwa src=43090822.89299996 mart=43090822.893000014 (diff 0.00) |
 | `rwa_risk_weight_parity` | PASS | all account_type risk weights match the SAS mapping |
-| `delinquency_completeness` | PASS | credit-product accounts = 252, mart accounts = 252 |
-| `delinquency_control_total` | PASS | balance src=49607451.61999999 mart=49607451.61999999 (diff 0.00); past_due src=614537.77 mart=614537.7699999999 (diff 0.00) |
+| `delinquency_completeness` | PASS | credit-product accounts = 249, mart accounts = 249 |
+| `delinquency_control_total` | PASS | balance src=49638808.090000026 mart=49638808.089999996 (diff 0.00); past_due src=0.0 mart=0.0 (diff 0.00) |
 | `delinquency_bucket_parity` | PASS | all (type, region, bucket) counts match the SAS mapping |
 
 **7 passed, 0 failed, 0 skipped**

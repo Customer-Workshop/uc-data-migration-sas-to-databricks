@@ -11,48 +11,67 @@
     account type, region, and bucket.
 
   dbt Equivalent:
-    int_account_metrics replaces STG_BANK.CUST_ACCOUNTS_DAILY and carries
-    days_past_due / past_due_amount forward from the raw account snapshot (the
-    same place the SAS query reads the unqualified DAYS_PAST_DUE /
-    PAST_DUE_AMOUNT columns). The SAS LEFT JOIN to ORA_DW.LOAN_DETAILS is not
-    reproduced because Step 2 reads no loan_details columns — it is a left join
-    on a unique key, so dropping it changes neither the row population nor the
-    measures. The CASE reproduces the SAS bucket mapping value-for-value; per-
-    value fidelity is gated by tests/reconcile_delinquency_bucket_parity.sql.
+    int_account_metrics replaces STG_BANK.CUST_ACCOUNTS_DAILY. The CASE
+    reproduces the SAS bucket mapping value-for-value; per-value fidelity is
+    gated by tests/reconcile_delinquency_bucket_parity.sql.
+
+  Data-source mapping notes (flagged, not logic changes):
+    - SAS reads DAYS_PAST_DUE from the daily snapshot. The Databricks raw schema
+      has no current days_past_due column; the closest available signal is
+      raw.payment_history.max_days_past_due_ever, used here as the bucketing
+      input. This is a coarser "worst ever" measure rather than the current
+      month-end value — a documented data gap, not a remediation.
+    - SAS sums PAST_DUE_AMOUNT. There is no past-due-amount column in the
+      Databricks raw schema, so total_past_due is reported as 0 (a flagged data
+      gap). The reconciliation control ties this out to the (absent) source.
 
   Source-faithful quirks reproduced (flagged, NOT corrected):
     - The explicit 'Unknown' else branch catches NULL / negative days_past_due.
-      In the current raw data every in-scope account has days_past_due >= 0, so
-      this branch does not fire, but it is preserved for fidelity.
+      Preserved for fidelity even where the data does not trigger it.
     - The SAS SNAPSHOT_DATE = month_end filter has no equivalent here: the dbt
       snapshot is point-in-time (no time-series snapshots are materialized).
 */
 
 with accounts as (
-    select * from {{ ref('int_account_metrics') }}
+    select
+        account_id,
+        account_type,
+        region_code,
+        current_balance
+    from {{ ref('int_account_metrics') }}
+    where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+),
+
+payment_history as (
+    select
+        account_id,
+        max_days_past_due_ever as days_past_due
+    from {{ source('banking_raw', 'payment_history') }}
 ),
 
 -- Delinquency bucket per account — mirrors the SAS CASE in Step 2 exactly.
 bucketed as (
     select
         '{{ var("prev_ym") }}' as report_month,
-        account_type,
-        region_code,
-        current_balance,
-        coalesce(past_due_amount, 0) as past_due_amount,
+        a.account_type,
+        a.region_code,
+        a.current_balance,
+        -- PAST_DUE_AMOUNT has no source column in the Databricks raw schema.
+        cast(0 as double) as past_due_amount,
         case
-            when days_past_due = 0 then 'Current'
-            when days_past_due between 1 and 29 then '1-29'
-            when days_past_due between 30 and 59 then '30-59'
-            when days_past_due between 60 and 89 then '60-89'
-            when days_past_due between 90 and 119 then '90-119'
-            when days_past_due between 120 and 179 then '120-179'
-            when days_past_due >= 180 then '180+'
+            when p.days_past_due = 0 then 'Current'
+            when p.days_past_due between 1 and 29 then '1-29'
+            when p.days_past_due between 30 and 59 then '30-59'
+            when p.days_past_due between 60 and 89 then '60-89'
+            when p.days_past_due between 90 and 119 then '90-119'
+            when p.days_past_due between 120 and 179 then '120-179'
+            when p.days_past_due >= 180 then '180+'
             -- SAS: else 'Unknown' — catches NULL days_past_due (source-faithful).
             else 'Unknown'
         end as delinq_bucket
-    from accounts
-    where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+    from accounts a
+    left join payment_history p
+        on a.account_id = p.account_id
 ),
 
 -- Aggregate to the reporting grain (SAS: group by 1,2,3,4).

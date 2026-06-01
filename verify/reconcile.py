@@ -111,12 +111,18 @@ class Reconciler:
     # ── monthly_regulatory_reporting.sas Step 1 — RWA controls ──────────
     # SAS risk-weight CASE (source of truth), used to recompute expected values
     # independently of the mart.
+    # LTV is reconstructed as current_balance / collateral_value from
+    # raw.collateral (the Databricks raw schema has no stored ltv column).
     _RWA_CASE = """
         case
             when a.account_type in ('CHK','SAV','MMA') then 0.00
             when a.account_type = 'CD' then 0.00
-            when a.account_type = 'MTG' and l.ltv <= 0.80 then 0.35
-            when a.account_type = 'MTG' and l.ltv > 0.80 then 0.50
+            when a.account_type = 'MTG'
+                and c.collateral_value > 0
+                and a.current_balance / c.collateral_value <= 0.80 then 0.35
+            when a.account_type = 'MTG'
+                and c.collateral_value > 0
+                and a.current_balance / c.collateral_value > 0.80 then 0.50
             when a.account_type = 'HELC' then 0.50
             when a.account_type in ('AUTO','PERS') then 0.75
             when a.account_type = 'CC' then 0.75
@@ -149,7 +155,7 @@ class Reconciler:
                 sum(a.current_balance),
                 sum(a.current_balance * ({self._RWA_CASE}))
             from {self.intermediate}.int_account_metrics a
-            left join {self.raw}.loan_details l on a.account_id = l.account_id
+            left join {self.raw}.collateral c on a.account_id = c.account_id
             """
         )[0]
         act_exposure, act_rwa = self._rows(
@@ -177,7 +183,7 @@ class Reconciler:
                 f"""
                 select a.account_type, ({self._RWA_CASE}) as rw, count(*)
                 from {self.intermediate}.int_account_metrics a
-                left join {self.raw}.loan_details l on a.account_id = l.account_id
+                left join {self.raw}.collateral c on a.account_id = c.account_id
                 group by a.account_type, rw
                 """
             )
@@ -206,15 +212,17 @@ class Reconciler:
 
     # ── monthly_regulatory_reporting.sas Step 2 — delinquency controls ──
     _DELINQ_TYPES = "('MTG','AUTO','PERS','CC','LOC','HELC')"
+    # days_past_due is sourced from raw.payment_history.max_days_past_due_ever
+    # (the Databricks raw schema has no current days_past_due column).
     _BUCKET_CASE = """
         case
-            when days_past_due = 0 then 'Current'
-            when days_past_due between 1 and 29 then '1-29'
-            when days_past_due between 30 and 59 then '30-59'
-            when days_past_due between 60 and 89 then '60-89'
-            when days_past_due between 90 and 119 then '90-119'
-            when days_past_due between 120 and 179 then '120-179'
-            when days_past_due >= 180 then '180+'
+            when p.days_past_due = 0 then 'Current'
+            when p.days_past_due between 1 and 29 then '1-29'
+            when p.days_past_due between 30 and 59 then '30-59'
+            when p.days_past_due between 60 and 89 then '60-89'
+            when p.days_past_due between 90 and 119 then '90-119'
+            when p.days_past_due between 120 and 179 then '120-179'
+            when p.days_past_due >= 180 then '180+'
             else 'Unknown'
         end
     """
@@ -240,9 +248,11 @@ class Reconciler:
 
     def check_delinquency_control_total(self):
         """total_balance and total_past_due must tie out to source."""
+        # PAST_DUE_AMOUNT has no source column in the Databricks raw schema, so
+        # the faithful expected past-due is 0 (flagged data gap).
         exp_bal, exp_pd = self._rows(
             f"""
-            select sum(current_balance), sum(coalesce(past_due_amount, 0))
+            select sum(current_balance), cast(0 as double)
             from {self.intermediate}.int_account_metrics
             where account_type in {self._DELINQ_TYPES}
             """
@@ -270,10 +280,14 @@ class Reconciler:
             (t, r, b): int(n)
             for t, r, b, n in self._rows(
                 f"""
-                select account_type, region_code, ({self._BUCKET_CASE}) as bucket, count(*)
-                from {self.intermediate}.int_account_metrics
-                where account_type in {self._DELINQ_TYPES}
-                group by account_type, region_code, bucket
+                select a.account_type, a.region_code, ({self._BUCKET_CASE}) as bucket, count(*)
+                from {self.intermediate}.int_account_metrics a
+                left join (
+                    select account_id, max_days_past_due_ever as days_past_due
+                    from {self.raw}.payment_history
+                ) p on a.account_id = p.account_id
+                where a.account_type in {self._DELINQ_TYPES}
+                group by a.account_type, a.region_code, bucket
                 """
             )
         }

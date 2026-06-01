@@ -15,26 +15,35 @@
 
   Expected buckets are recomputed per account from raw days_past_due and compared
   to the mart at (account_type, region_code, bucket) grain. Any mismatch leaves
-  an unmatched row on one side of the full outer join and fails.
+  an unmatched row on one side of the full outer join and fails. days_past_due is
+  sourced from raw.payment_history.max_days_past_due_ever (the Databricks raw
+  schema has no current days_past_due column — see mart header).
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
 with expected_per_account as (
     select
-        account_type,
-        region_code,
+        a.account_type,
+        a.region_code,
         case
-            when days_past_due = 0 then 'Current'
-            when days_past_due between 1 and 29 then '1-29'
-            when days_past_due between 30 and 59 then '30-59'
-            when days_past_due between 60 and 89 then '60-89'
-            when days_past_due between 90 and 119 then '90-119'
-            when days_past_due between 120 and 179 then '120-179'
-            when days_past_due >= 180 then '180+'
+            when p.days_past_due = 0 then 'Current'
+            when p.days_past_due between 1 and 29 then '1-29'
+            when p.days_past_due between 30 and 59 then '30-59'
+            when p.days_past_due between 60 and 89 then '60-89'
+            when p.days_past_due between 90 and 119 then '90-119'
+            when p.days_past_due between 120 and 179 then '120-179'
+            when p.days_past_due >= 180 then '180+'
             else 'Unknown'
         end as bucket
-    from {{ ref('int_account_metrics') }}
-    where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+    from {{ ref('int_account_metrics') }} a
+    left join (
+        select
+            account_id,
+            max_days_past_due_ever as days_past_due
+        from {{ source('banking_raw', 'payment_history') }}
+    ) p
+        on a.account_id = p.account_id
+    where a.account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
 ),
 
 expected_summary as (

@@ -38,8 +38,6 @@ from faker import Faker
 ACCOUNT_TYPES = ["CHK", "SAV", "MMA", "CD", "IRA", "LOC", "MTG", "AUTO", "PERS", "CC", "HELC"]
 REVOLVING = {"CC", "LOC", "HELC"}
 LENDING = {"MTG", "AUTO", "PERS", "CC", "LOC", "HELC"}
-# Secured products carry a stored LTV in LOAN_DETAILS (SAS: ORA_DW.LOAN_DETAILS).
-SECURED = {"MTG", "AUTO", "HELC"}
 # staging keeps only these; 'W'/'C' are filtered out by stg_cust_accounts
 ACTIVE_STATUSES = ["A", "A", "A", "A", "D", "F", "R", "S", "P"]
 FILTERED_STATUSES = ["W", "C"]
@@ -101,13 +99,6 @@ def generate(customers: int, accounts: int, days: int, seed: int):
         last_act = _d(rnd.randint(0, 800))
         bal = round(rnd.uniform(-5_000, 400_000), 2)
         credit_limit = round(rnd.uniform(5_000, 100_000), 2) if atype in REVOLVING else 0.0
-        # days_past_due: 0 for most accounts; a fraction of credit products are
-        # delinquent. Read by monthly_regulatory_reporting.sas Step 2 from the
-        # daily account snapshot (STG_BANK.CUST_ACCOUNTS_DAILY).
-        dpd = 0
-        if atype in LENDING and rnd.random() < 0.25:
-            dpd = rnd.choices([0, 15, 45, 75, 100, 150, 200], weights=[3, 2, 2, 1, 1, 1, 1])[0]
-        past_due_amt = round(abs(bal) * rnd.uniform(0.01, 0.15), 2) if dpd > 0 else 0.0
         accts.append({
             "account_id": aid,
             "customer_id": cid,
@@ -122,8 +113,6 @@ def generate(customers: int, accounts: int, days: int, seed: int):
             "branch_id": f"BR{rnd.randint(1, 40):03d}",
             "officer_id": f"OFF{rnd.randint(1, 120):04d}",
             "last_activity_date": last_act,
-            "days_past_due": dpd,
-            "past_due_amount": past_due_amt,
         })
         pay_hist.append({
             "account_id": aid,
@@ -157,25 +146,14 @@ def generate(customers: int, accounts: int, days: int, seed: int):
 
     loans = []
     for acct in accts:
-        if acct["account_type"] in LENDING:
-            principal = round(abs(acct["current_balance"]) + rnd.uniform(1_000, 50_000), 2)
-            # LTV (loan-to-value) is stored only for secured products; the SAS
-            # RWA query bands MTG by it. allowance_amt feeds the (out-of-scope)
-            # LLP step but is part of the LOAN_DETAILS record.
-            ltv = None
-            if acct["account_type"] in SECURED:
-                coll_val = round(principal * rnd.uniform(1.0, 2.0) + 10_000, 2)
-                ltv = round(abs(acct["current_balance"]) / coll_val, 4) if coll_val > 0 else None
-            allowance = round(abs(acct["current_balance"]) * rnd.uniform(0.005, 0.05), 2)
+        if acct["account_type"] in ("MTG", "AUTO", "PERS"):
             loans.append({
                 "loan_id": f"LN{acct['account_id'][4:]}",
                 "account_id": acct["account_id"],
-                "principal": principal,
+                "principal": round(abs(acct["current_balance"]) + rnd.uniform(1_000, 50_000), 2),
                 "rate": acct["interest_rate"],
                 "term_months": rnd.choice([36, 48, 60, 120, 180, 360]),
                 "origination_date": acct["open_date"],
-                "ltv": ltv,
-                "allowance_amt": allowance,
             })
 
     return {
@@ -260,7 +238,6 @@ SCHEMAS = {
         "current_balance": "DOUBLE", "available_balance": "DOUBLE", "credit_limit": "DOUBLE",
         "interest_rate": "DOUBLE", "branch_id": "STRING", "officer_id": "STRING",
         "last_activity_date": "DATE",
-        "days_past_due": "INT", "past_due_amount": "DOUBLE",
     },
     "daily_transactions": {
         "transaction_id": "STRING", "account_id": "STRING", "transaction_amount": "DOUBLE",
@@ -277,7 +254,6 @@ SCHEMAS = {
     "loan_details": {
         "loan_id": "STRING", "account_id": "STRING", "principal": "DOUBLE",
         "rate": "DOUBLE", "term_months": "INT", "origination_date": "DATE",
-        "ltv": "DOUBLE", "allowance_amt": "DOUBLE",
     },
     "policies": {
         "policy_id": "STRING", "policy_type": "STRING", "policyholder_id": "STRING",

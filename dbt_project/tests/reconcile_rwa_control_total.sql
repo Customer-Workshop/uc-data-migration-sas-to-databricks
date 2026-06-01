@@ -6,7 +6,9 @@
     2. rwa             == sum(current_balance * risk_weight)  (weighting preserved)
 
   The expected RWA is recomputed from the raw inputs using the SAS risk-weight
-  CASE (source of truth), independently of the mart.
+  CASE (source of truth), independently of the mart. LTV is reconstructed as
+  current_balance / collateral_value from raw.collateral (the Databricks raw
+  schema has no stored ltv column — see mart header).
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
@@ -18,8 +20,12 @@ with expected as (
                 case
                     when a.account_type in ('CHK', 'SAV', 'MMA') then 0.00
                     when a.account_type = 'CD' then 0.00
-                    when a.account_type = 'MTG' and l.ltv <= 0.80 then 0.35
-                    when a.account_type = 'MTG' and l.ltv > 0.80 then 0.50
+                    when a.account_type = 'MTG'
+                        and c.collateral_value > 0
+                        and a.current_balance / c.collateral_value <= 0.80 then 0.35
+                    when a.account_type = 'MTG'
+                        and c.collateral_value > 0
+                        and a.current_balance / c.collateral_value > 0.80 then 0.50
                     when a.account_type = 'HELC' then 0.50
                     when a.account_type in ('AUTO', 'PERS') then 0.75
                     when a.account_type = 'CC' then 0.75
@@ -29,8 +35,8 @@ with expected as (
             )
         ) as rwa
     from {{ ref('int_account_metrics') }} a
-    left join {{ source('banking_raw', 'loan_details') }} l
-        on a.account_id = l.account_id
+    left join {{ source('banking_raw', 'collateral') }} c
+        on a.account_id = c.account_id
 ),
 
 mart as (

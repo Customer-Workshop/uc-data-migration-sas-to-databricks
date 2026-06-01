@@ -33,11 +33,6 @@ joined as (
         a.branch_id,
         a.officer_id,
         a.last_activity_date,
-        -- Carried forward for monthly_regulatory_reporting.sas Step 2
-        -- (delinquency aging): the SAS daily account snapshot
-        -- (STG_BANK.CUST_ACCOUNTS_DAILY) exposes these directly.
-        a.days_past_due,
-        a.past_due_amount,
         d.first_name,
         d.last_name,
         d.ssn_hash,
