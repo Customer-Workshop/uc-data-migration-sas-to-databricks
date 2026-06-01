@@ -21,7 +21,8 @@ also works as a CI / pre-merge gate.
 This is the harness *framework* with the banking-domain control
 (`account_completeness`). When a new program is converted, its conversion adds
 the matching controls here (e.g. risk-weight parity, control totals, cross-engine
-PySpark checks) — see docs/CONVERSION_PLAYBOOK.md for the reconciliation contract.
+PySpark checks) — see .workshop/playbooks/sas-to-databricks-conversion.devin.md
+and .agents/skills/sas-to-databricks-conversion/SKILL.md for the reconciliation contract.
 
 Usage
 -----
