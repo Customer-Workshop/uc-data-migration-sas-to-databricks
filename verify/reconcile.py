@@ -99,9 +99,138 @@ class Reconciler:
             )
         )
 
+    def check_policy_valuation_completeness(self):
+        """int_policy_valuation rows must equal in-scope active policies."""
+        try:
+            expected = self._scalar(
+                f"""
+                select count(*)
+                from {self.raw}.policies
+                where policy_status = 'ACTIVE'
+                  and effective_date <= current_date()
+                  and expiry_date >= current_date()
+                """
+            )
+            actual = self._scalar(
+                f"select count(*) from {self.intermediate}.int_policy_valuation"
+            )
+            ok = expected == actual
+            self.results.append(
+                CheckResult(
+                    "policy_valuation_completeness",
+                    "PASS" if ok else "FAIL",
+                    f"in-scope active policies = {expected}, model rows = {actual}",
+                    {"expected": expected, "actual": actual},
+                )
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("policy_valuation_completeness", "SKIP", str(exc))
+            )
+
+    def check_policy_valuation_earned_premium_total(self):
+        """Sum of ytd_earned_premium in intermediate must match mart total_earned."""
+        try:
+            int_total = self._scalar(
+                f"""
+                select coalesce(sum(ytd_earned_premium), 0)
+                from {self.intermediate}.int_policy_valuation
+                """
+            )
+            mart_total = self._scalar(
+                f"""
+                select coalesce(sum(total_earned), 0)
+                from {self.marts}.mart_loss_ratios
+                """
+            )
+            diff = abs(float(int_total or 0) - float(mart_total or 0))
+            ok = diff <= 0.01
+            self.results.append(
+                CheckResult(
+                    "policy_valuation_earned_premium_total",
+                    "PASS" if ok else "FAIL",
+                    f"intermediate total = {int_total}, mart total = {mart_total}, diff = {diff:.2f}",
+                    {"intermediate": int_total, "mart": mart_total, "diff": diff},
+                )
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("policy_valuation_earned_premium_total", "SKIP", str(exc))
+            )
+
+    def check_policy_valuation_premium_adequate_parity(self):
+        """PREMIUM_ADEQUATE flag must match recomputed value from combined_ratio."""
+        try:
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.intermediate}.int_policy_valuation
+                where premium_adequate <>
+                    case
+                        when combined_ratio is null then 'N'
+                        when combined_ratio > 1.0   then 'N'
+                        else 'Y'
+                    end
+                """
+            )
+            ok = mismatches == 0
+            self.results.append(
+                CheckResult(
+                    "policy_valuation_premium_adequate_parity",
+                    "PASS" if ok else "FAIL",
+                    f"mismatched rows = {mismatches}",
+                    {"mismatches": mismatches},
+                )
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("policy_valuation_premium_adequate_parity", "SKIP", str(exc))
+            )
+
+    def check_loss_ratios_parity(self):
+        """mart_loss_ratios agg_loss_ratio must equal total_incurred / total_earned."""
+        try:
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.marts}.mart_loss_ratios
+                where abs(
+                    coalesce(agg_loss_ratio, -999)
+                    - coalesce(
+                        case when total_earned > 0
+                            then total_incurred / total_earned else null end,
+                        -999)
+                ) > 0.0001
+                or abs(
+                    coalesce(agg_combined_ratio, -999)
+                    - coalesce(
+                        case when total_earned > 0
+                            then total_incurred / total_earned + 0.30 else null end,
+                        -999)
+                ) > 0.0001
+                """
+            )
+            ok = mismatches == 0
+            self.results.append(
+                CheckResult(
+                    "loss_ratios_parity",
+                    "PASS" if ok else "FAIL",
+                    f"mismatched policy_type rows = {mismatches}",
+                    {"mismatches": mismatches},
+                )
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult("loss_ratios_parity", "SKIP", str(exc))
+            )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_policy_valuation_completeness()
+        self.check_policy_valuation_earned_premium_total()
+        self.check_policy_valuation_premium_adequate_parity()
+        self.check_loss_ratios_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 

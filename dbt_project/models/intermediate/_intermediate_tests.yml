@@ -114,16 +114,33 @@ models:
         description: Insurance line of business.
         data_tests:
           - not_null
+          - accepted_values:
+              values: ['AUTO', 'HOME', 'LIFE', 'HEALTH', 'COMMERCIAL']
 
       - name: annual_premium
         description: Must be positive for active policies.
         data_tests:
           - not_null
 
+      - name: ytd_earned_premium
+        description: >
+          Year-to-date earned premium (monthly pro-rata). Replaces SAS
+          annual_premium / 12 * min(12, intck(...)) calculation.
+
+      - name: loss_ratio
+        description: >
+          Loss ratio = total_incurred / ytd_earned_premium. Null when
+          ytd_earned_premium <= 0.
+
+      - name: combined_ratio
+        description: >
+          Combined ratio = loss_ratio + 0.30. Hard-coded expense load
+          reproduced from SAS source.
+
       - name: premium_adequate
         description: >
-          Y if combined ratio <= 1.0, else N. Flags policies where
-          premiums may be insufficient to cover losses.
+          Y if combined ratio <= 1.0, else N. QUIRK: null combined
+          ratio (zero earned premium) → N (source-faithful).
         data_tests:
           - accepted_values:
               values: ['Y', 'N']
@@ -135,3 +152,12 @@ models:
         data_tests:
           - accepted_values:
               values: ['Y', 'N']
+
+      - name: ibnr_estimate
+        description: >
+          IBNR = max(0, earned_premium * 0.15 - total_paid). Simplified
+          actuarial estimate reproduced from SAS source.
+
+      - name: total_reserve
+        description: >
+          Total reserve = open case reserves + IBNR estimate.
