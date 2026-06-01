@@ -36,11 +36,18 @@ Credentials are read from the environment (same vars dbt uses):
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import os
 import sys
 from dataclasses import dataclass, field
 
 from databricks import sql
+
+
+def _prev_ym() -> str:
+    """Previous calendar month as YYYYMM (matches dbt var('prev_ym') / SAS PREV_YM)."""
+    first_of_month = dt.date.today().replace(day=1)
+    return (first_of_month - dt.timedelta(days=1)).strftime("%Y%m")
 
 
 @dataclass
@@ -77,6 +84,17 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _table_exists(self, schema: str, table: str) -> bool:
+        try:
+            n = self._scalar(
+                f"select count(*) from {self.catalog}.information_schema.tables "
+                f"where table_schema = '{schema.split('.')[-1]}' "
+                f"and table_name = '{table}'"
+            )
+            return bool(n)
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -100,9 +118,116 @@ class Reconciler:
             )
         )
 
+    # ----------------------------------------------- customer_profitability.sas
+    def _customer_pnl_checks(self):
+        """Controls for mart_customer_pnl (customer_profitability.sas).
+
+        SKIP (not FAIL) when the mart has not been built into this namespace, so
+        the report stays meaningful for namespaces that converted other programs.
+        """
+        marts = self.marts.split(".")[-1]
+        if not self._table_exists(marts, "mart_customer_pnl"):
+            for name in (
+                "customer_pnl_completeness",
+                "customer_pnl_control_total",
+                "customer_pnl_account_type_parity",
+                "customer_pnl_profit_tier_parity",
+            ):
+                self.results.append(
+                    CheckResult(name, "SKIP", "mart_customer_pnl not built in this namespace")
+                )
+            return
+
+        pnl = f"{self.marts}.mart_customer_pnl"
+        accts = f"{self.intermediate}.int_account_metrics"
+        txns = f"{self.marts}.mart_daily_transactions"
+        ym = _prev_ym()
+
+        # completeness — one P&L row per in-scope customer (SAS Step 4 "if a").
+        expected = self._scalar(f"select count(distinct customer_id) from {accts}")
+        actual = self._scalar(f"select count(*) from {pnl}")
+        self.results.append(
+            CheckResult(
+                "customer_pnl_completeness",
+                "PASS" if expected == actual else "FAIL",
+                f"in-scope customers = {expected}, P&L rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+        # control total — net interest income ties to the source account-type CASE.
+        model_nii = self._scalar(f"select sum(net_interest_income) from {pnl}") or 0
+        source_nii = self._scalar(
+            f"""
+            select sum(
+                case when account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+                     then current_balance * interest_rate / 12 else 0 end
+              - case when account_type in ('CHK','SAV','MMA','CD','IRA')
+                     then current_balance * interest_rate / 12 else 0 end)
+            from {accts}
+            """
+        ) or 0
+        # fee income ties to the report-month FEE transactions (SAS Step 2 scope).
+        model_fee = self._scalar(f"select sum(fee_income) from {pnl}") or 0
+        source_fee = self._scalar(
+            f"""
+            select sum(case when transaction_type = 'FEE'
+                            then abs(transaction_amount) else 0 end)
+            from {txns}
+            where date_format(transaction_date, 'yyyyMM') = '{ym}'
+              and customer_id in (select customer_id from {accts})
+            """
+        ) or 0
+        nii_ok = abs(float(model_nii) - float(source_nii)) <= 0.01
+        fee_ok = abs(float(model_fee) - float(source_fee)) <= 0.01
+        self.results.append(
+            CheckResult(
+                "customer_pnl_control_total",
+                "PASS" if (nii_ok and fee_ok) else "FAIL",
+                f"net_interest_income model={float(model_nii):.2f} source={float(source_nii):.2f}; "
+                f"fee_income[{ym}] model={float(model_fee):.2f} source={float(source_fee):.2f}",
+            )
+        )
+
+        # parity — every source account type is covered by the SAS income mapping.
+        uncovered = self._scalar(
+            f"""
+            select count(*) from (select distinct account_type from {accts}) t
+            where account_type not in ('MTG','AUTO','PERS','CC','LOC','HELC')
+              and account_type not in ('CHK','SAV','MMA','CD','IRA')
+            """
+        )
+        self.results.append(
+            CheckResult(
+                "customer_pnl_account_type_parity",
+                "PASS" if uncovered == 0 else "FAIL",
+                f"account types falling through the SAS CASE (silently zeroed) = {uncovered}",
+            )
+        )
+
+        # parity — stored profit_tier matches the SAS threshold ladder per row.
+        mismatches = self._scalar(
+            f"""
+            select count(*) from {pnl}
+            where profit_tier is distinct from (
+                case when net_profit >= 500 then 'Highly Profitable'
+                     when net_profit >= 100 then 'Profitable'
+                     when net_profit >= 0   then 'Marginal'
+                     else 'Unprofitable' end)
+            """
+        )
+        self.results.append(
+            CheckResult(
+                "customer_pnl_profit_tier_parity",
+                "PASS" if mismatches == 0 else "FAIL",
+                f"rows whose profit_tier diverges from the SAS mapping = {mismatches}",
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self._customer_pnl_checks()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
