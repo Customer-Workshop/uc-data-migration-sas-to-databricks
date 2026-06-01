@@ -1,23 +1,25 @@
 /*
-  Reconciliation test: net_interest_income control total.
+  Reconciliation test: P&L assembly control totals.
 
-  Verifies that the mart's net_interest_income equals lending_income minus
-  deposit_cost for every row — catching any arithmetic drift between the
-  component columns and the derived column.
+  Verifies the arithmetic integrity of the P&L assembly (SAS Step 4):
+    1. total_revenue = net_interest_income + fee_income
+    2. net_profit = total_revenue - operating_cost - total_ecl
 
-  The full cross-source check (mart NII vs independent staging calculation) is
+  The full cross-source NII check (mart vs independent staging calculation) is
   performed by verify/reconcile.py after `dbt build`, which guarantees the mart
-  and staging are built from the same raw data snapshot. This dbt singular test
-  is designed to pass under `dbt test` (CI) where the mart TABLE may be stale
-  relative to the staging VIEW.
+  and staging are built from the same raw data snapshot.
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
 select
     customer_id,
-    lending_income,
-    deposit_cost,
     net_interest_income,
-    abs(net_interest_income - (lending_income - deposit_cost)) as drift
+    fee_income,
+    total_revenue,
+    operating_cost,
+    total_ecl,
+    net_profit
 from {{ ref('mart_customer_pnl') }}
-where abs(net_interest_income - (lending_income - deposit_cost)) > 0.01
+where
+    abs(total_revenue - (net_interest_income + fee_income)) > 0.01
+    or abs(net_profit - (total_revenue - operating_cost - total_ecl)) > 0.01
