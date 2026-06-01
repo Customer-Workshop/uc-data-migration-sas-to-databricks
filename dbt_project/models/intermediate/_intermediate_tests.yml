@@ -142,6 +142,7 @@ models:
           Y if combined ratio <= 1.0, else N. QUIRK: null combined
           ratio (zero earned premium) → N (source-faithful).
         data_tests:
+          - not_null
           - accepted_values:
               values: ['Y', 'N']
 
@@ -150,6 +151,7 @@ models:
           Y if policy expires within 3 months. Replaces SAS intck/intnx
           calculation.
         data_tests:
+          - not_null
           - accepted_values:
               values: ['Y', 'N']
 
