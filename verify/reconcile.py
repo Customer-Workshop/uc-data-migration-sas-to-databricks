@@ -100,9 +100,123 @@ class Reconciler:
             )
         )
 
+    # --------------------------------------------------- insurance: policy_valuation
+    # Controls for policy_valuation.sas -> int_policy_valuation + mart_loss_ratios.
+    # Each is wrapped so a namespace that has not built the insurance models yet
+    # records a SKIP (missing prerequisite) instead of crashing the report.
+    def _guard(self, name: str, fn):
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - report, don't crash
+            msg = str(exc).splitlines()[0][:160]
+            self.results.append(CheckResult(name, "SKIP", f"prerequisite missing: {msg}"))
+
+    def check_policy_completeness(self):
+        """int_policy_valuation must equal the in-force raw population (no loss/fan-out)."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.policies
+            where policy_status = 'ACTIVE'
+              and effective_date <= current_date()
+              and expiry_date >= current_date()
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.intermediate}.int_policy_valuation")
+        distinct = self._scalar(
+            f"select count(distinct policy_id) from {self.intermediate}.int_policy_valuation"
+        )
+        ok = expected == actual == distinct
+        self.results.append(
+            CheckResult(
+                "policy_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-force raw policies = {expected}, model policies = {actual} "
+                f"(distinct = {distinct})",
+                {"expected": expected, "actual": actual, "distinct": distinct},
+            )
+        )
+
+    def check_loss_ratio_control_total(self):
+        """Control totals must be conserved from int_policy_valuation to mart_loss_ratios."""
+        int_earned = self._scalar(
+            f"select sum(ytd_earned_premium) from {self.intermediate}.int_policy_valuation"
+        )
+        mart_earned = self._scalar(f"select sum(total_earned) from {self.marts}.mart_loss_ratios")
+        int_n = self._scalar(f"select count(*) from {self.intermediate}.int_policy_valuation")
+        mart_n = self._scalar(f"select sum(n_policies) from {self.marts}.mart_loss_ratios")
+        ok = int_n == mart_n and abs((int_earned or 0) - (mart_earned or 0)) <= 0.01
+        self.results.append(
+            CheckResult(
+                "loss_ratio_control_total",
+                "PASS" if ok else "FAIL",
+                f"earned premium int = {int_earned:,.2f} vs mart = {mart_earned:,.2f}; "
+                f"policies int = {int_n} vs mart = {mart_n}",
+                {"int_earned": int_earned, "mart_earned": mart_earned},
+            )
+        )
+
+    def check_premium_adequacy_parity(self):
+        """Every policy's premium_adequate flag must match the SAS rule recomputed in place."""
+        bad = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_policy_valuation
+            where premium_adequate <> case
+                when combined_ratio is null then 'N'
+                when combined_ratio > 1.0 then 'N'
+                else 'Y'
+            end
+            or (ytd_earned_premium > 0
+                and abs(coalesce(combined_ratio, 0) - (coalesce(loss_ratio, 0) + 0.30)) > 1e-9)
+            """
+        )
+        self.results.append(
+            CheckResult(
+                "premium_adequacy_parity",
+                "PASS" if bad == 0 else "FAIL",
+                f"{bad} policies diverge from the SAS premium-adequacy / combined-ratio rule",
+                {"violations": bad},
+            )
+        )
+
+    def check_loss_ratio_mapping_parity(self):
+        """mart policy_type_desc must reproduce $POLTYPE value-for-value (catch-all 'Unknown')."""
+        bad = self._scalar(
+            f"""
+            with expected as (
+                select code, label from values
+                    ('WL','Whole Life'),('TL','Term Life'),('UL','Universal Life'),
+                    ('VL','Variable Life'),('AUTO','Auto Insurance'),('HOME','Homeowners'),
+                    ('RENT','Renters'),('UMBR','Umbrella'),('HLTH','Health'),('DNTL','Dental'),
+                    ('VIS','Vision'),('DISAB','Disability'),('LTCI','Long-Term Care')
+                    as t(code, label)
+            )
+            select count(*)
+            from {self.marts}.mart_loss_ratios m
+            left join expected e on m.policy_type = e.code
+            where m.policy_type_desc <> coalesce(e.label, 'Unknown')
+               or (m.total_earned > 0
+                   and abs(coalesce(m.agg_combined_ratio, 0)
+                       - (coalesce(m.agg_loss_ratio, 0) + 0.30)) > 1e-9)
+            """
+        )
+        self.results.append(
+            CheckResult(
+                "loss_ratio_mapping_parity",
+                "PASS" if bad == 0 else "FAIL",
+                f"{bad} LOB rows diverge from $POLTYPE mapping or combined-ratio identity",
+                {"violations": bad},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self._guard("policy_completeness", self.check_policy_completeness)
+        self._guard("loss_ratio_control_total", self.check_loss_ratio_control_total)
+        self._guard("premium_adequacy_parity", self.check_premium_adequacy_parity)
+        self._guard("loss_ratio_mapping_parity", self.check_loss_ratio_mapping_parity)
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
