@@ -141,9 +141,9 @@ class Reconciler:
             select count(*)
             from (
                 select distinct account_type from {self.intermediate}.int_account_metrics
-            )
-            where account_type not in ('MTG','AUTO','PERS','CC','LOC','HELC',
-                                        'CHK','SAV','MMA','CD','IRA')
+            ) t
+            where t.account_type not in ('MTG','AUTO','PERS','CC','LOC','HELC',
+                                         'CHK','SAV','MMA','CD','IRA')
             """
         )
         ok = n_unclassified == 0
