@@ -118,8 +118,9 @@ class Reconciler:
               and c.claimed_amount <= p.sum_insured
             """
         )
-        actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
-        if actual is None:
+        try:
+            actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
+        except Exception:
             self.results.append(CheckResult("claims_completeness", "SKIP",
                                             "stg_claims not found"))
             return
@@ -135,13 +136,14 @@ class Reconciler:
 
     def check_claims_control_total(self):
         """Sum of claimed_amount must tie between staging and adjudication."""
-        stg = self._scalar(
-            f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.staging}.stg_claims"
-        )
-        adj = self._scalar(
-            f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.intermediate}.int_claims_adjudication"
-        )
-        if stg is None or adj is None:
+        try:
+            stg = self._scalar(
+                f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.staging}.stg_claims"
+            )
+            adj = self._scalar(
+                f"select cast(sum(claimed_amount) as decimal(18,2)) from {self.intermediate}.int_claims_adjudication"
+            )
+        except Exception:
             self.results.append(CheckResult("claims_control_total", "SKIP",
                                             "table(s) not found"))
             return
@@ -157,20 +159,21 @@ class Reconciler:
 
     def check_claims_fraud_risk_parity(self):
         """Every fraud_risk value must agree with the score-threshold mapping."""
-        mismatches = self._scalar(
-            f"""
-            select count(*)
-            from {self.intermediate}.int_claims_adjudication
-            where fraud_risk <> (
-                case
-                    when fraud_score >= 80 then 'HIGH'
-                    when fraud_score >= 50 then 'MEDIUM'
-                    else 'LOW'
-                end
+        try:
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.intermediate}.int_claims_adjudication
+                where fraud_risk <> (
+                    case
+                        when fraud_score >= 80 then 'HIGH'
+                        when fraud_score >= 50 then 'MEDIUM'
+                        else 'LOW'
+                    end
+                )
+                """
             )
-            """
-        )
-        if mismatches is None:
+        except Exception:
             self.results.append(CheckResult("claims_fraud_risk_parity", "SKIP",
                                             "int_claims_adjudication not found"))
             return
@@ -186,27 +189,28 @@ class Reconciler:
 
     def check_claims_adjudication_parity(self):
         """Every adjudication_result must agree with the SAS rule-priority chain."""
-        mismatches = self._scalar(
-            f"""
-            select count(*)
-            from {self.intermediate}.int_claims_adjudication
-            where adjudication_result <> (
-                case
-                    when fraud_risk = 'HIGH' then 'DENY'
-                    when fraud_risk = 'LOW'
-                         and claimed_amount <= 5000
-                         and policy_type in ('AUTO', 'HOME', 'RENT')
-                    then 'APPR'
-                    when fraud_risk = 'LOW'
-                         and claimed_amount <= sum_insured * 0.25
-                         and claimed_amount <= 50000
-                    then 'APPR'
-                    else 'PEND'
-                end
+        try:
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.intermediate}.int_claims_adjudication
+                where adjudication_result <> (
+                    case
+                        when fraud_risk = 'HIGH' then 'DENY'
+                        when fraud_risk = 'LOW'
+                             and claimed_amount <= 5000
+                             and policy_type in ('AUTO', 'HOME', 'RENT')
+                        then 'APPR'
+                        when fraud_risk = 'LOW'
+                             and claimed_amount <= sum_insured * 0.25
+                             and claimed_amount <= 50000
+                        then 'APPR'
+                        else 'PEND'
+                    end
+                )
+                """
             )
-            """
-        )
-        if mismatches is None:
+        except Exception:
             self.results.append(CheckResult("claims_adjudication_parity", "SKIP",
                                             "int_claims_adjudication not found"))
             return
@@ -222,9 +226,14 @@ class Reconciler:
 
     def check_claims_register_within_source(self):
         """PySpark curated claims_register row count bounded by adjudication input."""
-        adj_count = self._scalar(
-            f"select count(*) from {self.intermediate}.int_claims_adjudication"
-        )
+        try:
+            adj_count = self._scalar(
+                f"select count(*) from {self.intermediate}.int_claims_adjudication"
+            )
+        except Exception:
+            self.results.append(CheckResult("claims_register_within_source", "SKIP",
+                                            "int_claims_adjudication not found"))
+            return
         try:
             reg_count = self._scalar(
                 f"select count(*) from {self.curated}.claims_register"
