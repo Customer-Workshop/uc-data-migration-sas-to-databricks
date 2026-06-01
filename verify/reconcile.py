@@ -141,7 +141,10 @@ class Reconciler:
         pnl = f"{self.marts}.mart_customer_pnl"
         accts = f"{self.intermediate}.int_account_metrics"
         txns = f"{self.marts}.mart_daily_transactions"
-        ym = _prev_ym()
+        # Use the report month the mart was actually built with (dbt var('prev_ym'),
+        # derived from run_started_at in UTC) rather than recomputing from the local
+        # clock here — otherwise the two can disagree across a month boundary.
+        ym = self._scalar(f"select max(report_month) from {pnl}") or _prev_ym()
 
         # completeness — one P&L row per in-scope customer (SAS Step 4 "if a").
         expected = self._scalar(f"select count(distinct customer_id) from {accts}")
