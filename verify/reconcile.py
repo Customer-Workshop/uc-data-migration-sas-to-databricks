@@ -185,7 +185,9 @@ class Reconciler:
             row = cur.fetchone()
         finally:
             cur.close()
-        s_claimed, s_appr, m_claimed, m_appr = row
+        # SUM over an empty set returns SQL NULL (-> None); treat as 0 so the
+        # control still reports cleanly when a namespace has no valid claims.
+        s_claimed, s_appr, m_claimed, m_appr = (v or 0 for v in row)
         ok = abs(s_claimed - m_claimed) <= 0.01 and abs(s_appr - m_appr) <= 0.01
         self.results.append(
             CheckResult(
