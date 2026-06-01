@@ -33,6 +33,8 @@ joined as (
         a.branch_id,
         a.officer_id,
         a.last_activity_date,
+        a.days_past_due,
+        a.past_due_amount,
         d.first_name,
         d.last_name,
         d.ssn_hash,

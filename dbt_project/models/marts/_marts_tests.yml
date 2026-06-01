@@ -122,8 +122,18 @@ models:
         data_tests:
           - not_null
 
+      - name: customer_segment
+        description: Customer segment (RETAIL, PREMIER, etc.).
+        data_tests:
+          - not_null
+
       - name: risk_weight
         description: Basel III risk weight (0.00–1.00).
+        data_tests:
+          - not_null
+
+      - name: n_accounts
+        description: Count of accounts in the group.
         data_tests:
           - not_null
 
@@ -145,6 +155,24 @@ models:
       PROC SQL aggregation.
     columns:
       - name: report_month
+        data_tests:
+          - not_null
+
+      - name: account_type
+        description: Lending account type.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - MTG
+                - AUTO
+                - PERS
+                - CC
+                - LOC
+                - HELC
+
+      - name: region_code
+        description: Customer region code.
         data_tests:
           - not_null
 
@@ -170,6 +198,11 @@ models:
 
       - name: total_balance
         description: Sum of balances in bucket.
+        data_tests:
+          - not_null
+
+      - name: total_past_due
+        description: Sum of past-due amounts in bucket.
         data_tests:
           - not_null
 

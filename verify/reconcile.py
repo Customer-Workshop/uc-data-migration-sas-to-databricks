@@ -38,6 +38,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from databricks import sql
 
@@ -76,6 +77,14 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _fetchall(self, query: str):
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -99,9 +108,132 @@ class Reconciler:
             )
         )
 
+    def check_rwa_completeness(self):
+        """Sum of n_accounts in RWA mart must equal source account count."""
+        expected = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        actual = self._scalar(f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_regulatory_rwa")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"source accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_exposure_control_total(self):
+        """Total exposure in RWA mart must tie to source balances."""
+        expected = self._scalar(
+            f"select sum(current_balance) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(total_exposure), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        diff = abs((actual or 0) - (expected or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_exposure_control_total",
+                "PASS" if ok else "FAIL",
+                f"source balance = {expected}, mart exposure = {actual}, diff = {diff:.2f}",
+                {"expected": expected, "actual": actual, "diff": diff},
+            )
+        )
+
+    def check_rwa_risk_weight_coverage(self):
+        """Every (account_type, risk_weight) must be in the SAS mapping."""
+        valid = {
+            ("CHK", 0.00), ("SAV", 0.00), ("MMA", 0.00), ("CD", 0.00),
+            ("MTG", 0.35), ("MTG", 0.50), ("HELC", 0.50),
+            ("AUTO", 0.75), ("PERS", 0.75), ("CC", 0.75),
+            ("LOC", 1.00), ("IRA", 1.00),
+        }
+        rows = self._fetchall(
+            f"select distinct account_type, risk_weight from {self.marts}.mart_regulatory_rwa"
+        )
+        violations = []
+        for atype, rw in rows:
+            rw_f = float(rw) if isinstance(rw, Decimal) else rw
+            if not any(atype == v[0] and abs(rw_f - v[1]) < 0.001 for v in valid):
+                violations.append(f"{atype}={rw_f}")
+        ok = len(violations) == 0
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_coverage",
+                "PASS" if ok else "FAIL",
+                f"{len(rows)} combos checked, {len(violations)} violations: {', '.join(violations) or 'none'}",
+            )
+        )
+
+    def check_delinquency_completeness(self):
+        """Sum of n_accounts in delinquency mart must equal lending accounts in source."""
+        expected = self._scalar(
+            f"""
+            select count(*) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"source lending accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_delinquency_balance_control_total(self):
+        """Total balance in delinquency mart must tie to lending source balances."""
+        expected = self._scalar(
+            f"""
+            select sum(current_balance) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(total_balance), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        diff = abs((actual or 0) - (expected or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "delinquency_balance_control_total",
+                "PASS" if ok else "FAIL",
+                f"source balance = {expected}, mart balance = {actual}, diff = {diff:.2f}",
+                {"expected": expected, "actual": actual, "diff": diff},
+            )
+        )
+
+    def check_delinquency_bucket_parity(self):
+        """Every delinq_bucket in the mart must be a valid SAS bucket."""
+        valid_buckets = {"Current", "1-29", "30-59", "60-89", "90-119", "120-179", "180+", "Unknown"}
+        rows = self._fetchall(
+            f"select distinct delinq_bucket from {self.marts}.mart_delinquency_aging"
+        )
+        violations = [r[0] for r in rows if r[0] not in valid_buckets]
+        ok = len(violations) == 0
+        self.results.append(
+            CheckResult(
+                "delinquency_bucket_parity",
+                "PASS" if ok else "FAIL",
+                f"{len(rows)} distinct buckets, {len(violations)} invalid: {', '.join(violations) or 'none'}",
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_completeness()
+        self.check_rwa_exposure_control_total()
+        self.check_rwa_risk_weight_coverage()
+        self.check_delinquency_completeness()
+        self.check_delinquency_balance_control_total()
+        self.check_delinquency_bucket_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
