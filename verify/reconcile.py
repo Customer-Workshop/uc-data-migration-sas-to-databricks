@@ -99,9 +99,84 @@ class Reconciler:
             )
         )
 
+    def check_rwa_risk_weight_parity(self):
+        """Every account type's risk weight matches the SAS CASE value for value."""
+        violations = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_regulatory_rwa
+            where
+                (account_type in ('CHK', 'SAV', 'MMA') and risk_weight != 0.00)
+                or (account_type = 'CD' and risk_weight != 0.00)
+                or (account_type = 'MTG' and risk_weight not in (0.35, 0.50, 1.00))
+                or (account_type = 'HELC' and risk_weight != 0.50)
+                or (account_type in ('AUTO', 'PERS') and risk_weight != 0.75)
+                or (account_type = 'CC' and risk_weight != 0.75)
+                or (account_type = 'LOC' and risk_weight != 1.00)
+                or (
+                    account_type not in ('CHK', 'SAV', 'MMA', 'CD', 'MTG', 'HELC',
+                                         'AUTO', 'PERS', 'CC', 'LOC')
+                    and risk_weight != 1.00
+                )
+            """
+        )
+        ok = violations == 0
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                f"risk weight violations = {violations}",
+                {"violations": violations},
+            )
+        )
+
+    def check_rwa_exposure_control_total(self):
+        """Total exposure in mart ties out to source balances."""
+        mart_total = self._scalar(
+            f"select coalesce(sum(total_exposure), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        source_total = self._scalar(
+            f"select coalesce(sum(current_balance), 0) from {self.staging}.stg_cust_accounts"
+        )
+        diff = abs((mart_total or 0) - (source_total or 0))
+        ok = diff < 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_exposure_control_total",
+                "PASS" if ok else "FAIL",
+                f"mart exposure = {mart_total}, source balance = {source_total}, diff = {diff}",
+                {"mart_total": mart_total, "source_total": source_total, "difference": diff},
+            )
+        )
+
+    def check_delinquency_completeness(self):
+        """Delinquency model covers all in-scope lending accounts."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.staging}.stg_cust_accounts
+            where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope lending accounts = {expected}, model accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_risk_weight_parity()
+        self.check_rwa_exposure_control_total()
+        self.check_delinquency_completeness()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
