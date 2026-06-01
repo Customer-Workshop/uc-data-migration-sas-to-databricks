@@ -120,24 +120,29 @@ class Reconciler:
 
     def check_policy_valuation_completeness(self):
         """In-force policy count must match raw ACTIVE policies in period."""
-        expected = self._scalar(
-            f"""
-            select count(*)
-            from {self.raw}.policies
-            where policy_status = 'ACTIVE'
-              and effective_date <= current_date()
-              and expiry_date   >= current_date()
-            """
+        # Use the model's own valuation_date (set at dbt build time) so this
+        # check stays consistent even if run on a later day.
+        val_date = self._scalar_safe(
+            f"select max(valuation_date) from {self.intermediate}.int_policy_valuation"
         )
-        actual = self._scalar_safe(
-            f"select count(*) from {self.intermediate}.int_policy_valuation"
-        )
-        if actual is None:
+        if val_date is None:
             self.results.append(
                 CheckResult("policy_valuation_completeness", "SKIP",
                             "int_policy_valuation not found")
             )
             return
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.policies
+            where policy_status = 'ACTIVE'
+              and effective_date <= '{val_date}'
+              and expiry_date   >= '{val_date}'
+            """
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_policy_valuation"
+        )
         ok = expected == actual
         self.results.append(
             CheckResult(
