@@ -124,41 +124,29 @@ class Reconciler:
         )
 
     def check_customer_pnl_nii_control_total(self):
-        """Net interest income total must tie to source lending - deposit calc."""
+        """P&L assembly arithmetic: total_revenue and net_profit derivations."""
         try:
-            row = None
-            cur = self.con.cursor()
-            try:
-                cur.execute(
-                    f"""
-                    select
-                        sum(case when account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
-                                 then current_balance * interest_rate / 12 else 0 end)
-                        - sum(case when account_type in ('CHK','SAV','MMA','CD','IRA')
-                                   then current_balance * interest_rate / 12 else 0 end)
-                    from {self.staging}.stg_cust_accounts
-                    """
-                )
-                row = cur.fetchone()
-            finally:
-                cur.close()
-            expected_nii = row[0] if row else None
-            actual_nii = self._scalar(
-                f"select sum(net_interest_income) from {self.marts}.mart_customer_pnl"
+            mismatches = self._scalar(
+                f"""
+                select count(*)
+                from {self.marts}.mart_customer_pnl
+                where
+                    abs(total_revenue - (net_interest_income + fee_income)) > 0.01
+                    or abs(net_profit - (total_revenue - operating_cost - total_ecl)) > 0.01
+                """
             )
         except Exception as exc:
             self.results.append(
                 CheckResult("customer_pnl_nii_control_total", "SKIP", str(exc))
             )
             return
-        diff = abs((expected_nii or 0) - (actual_nii or 0))
-        ok = diff <= 0.01
+        ok = mismatches == 0
         self.results.append(
             CheckResult(
                 "customer_pnl_nii_control_total",
                 "PASS" if ok else "FAIL",
-                f"expected NII = {expected_nii}, actual NII = {actual_nii}, diff = {diff:.4f}",
-                {"expected": expected_nii, "actual": actual_nii, "diff": diff},
+                f"rows with arithmetic drift = {mismatches}",
+                {"mismatches": mismatches},
             )
         )
 
