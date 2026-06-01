@@ -121,9 +121,32 @@ models:
       - name: account_type
         data_tests:
           - not_null
+          - accepted_values:
+              values:
+                - CHK
+                - SAV
+                - MMA
+                - CD
+                - IRA
+                - LOC
+                - MTG
+                - AUTO
+                - PERS
+                - CC
+                - HELC
+
+      - name: customer_segment
+        description: Customer segment from demographics.
+        data_tests:
+          - not_null
 
       - name: risk_weight
         description: Basel III risk weight (0.00–1.00).
+        data_tests:
+          - not_null
+
+      - name: n_accounts
+        description: Count of accounts in group.
         data_tests:
           - not_null
 
@@ -139,12 +162,31 @@ models:
 
   - name: mart_delinquency_aging
     description: >
-      Delinquency aging buckets (Current/1-29/30-59/60-89/90-119/120-179/180+).
+      Delinquency aging buckets (Current/1-29/30-59/60-89/90-119/120-179/180+)
+      by account type and region. Lending account types only.
       Migrated from monthly_regulatory_reporting.sas (Step 2).
       SQL CASE replaces SAS bucket assignment, SQL GROUP BY replaces
       PROC SQL aggregation.
     columns:
       - name: report_month
+        data_tests:
+          - not_null
+
+      - name: account_type
+        description: Lending account type (SAS WHERE filter).
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - MTG
+                - AUTO
+                - PERS
+                - CC
+                - LOC
+                - HELC
+
+      - name: region_code
+        description: Geographic region code.
         data_tests:
           - not_null
 
@@ -170,6 +212,14 @@ models:
 
       - name: total_balance
         description: Sum of balances in bucket.
+        data_tests:
+          - not_null
+
+      - name: total_past_due
+        description: >
+          Sum of past-due amounts. Schema adaptation: SAS used
+          PAST_DUE_AMOUNT from LOAN_DETAILS; derived from
+          current_balance when days_past_due > 0.
         data_tests:
           - not_null
 

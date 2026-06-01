@@ -99,9 +99,190 @@ class Reconciler:
             )
         )
 
+    # ------------------------------------------------------------------ RWA
+    def check_rwa_risk_weight_parity(self):
+        """Every (account_type, risk_weight) pair in the mart must match the
+        independently derived SAS CASE mapping applied to the source."""
+        query = f"""
+        with source_weights as (
+            select
+                a.account_type,
+                case
+                    when a.account_type in ('CHK','SAV','MMA') then 0.00
+                    when a.account_type = 'CD'                 then 0.00
+                    when a.account_type = 'MTG'
+                         and c.collateral_value is not null
+                         and c.collateral_value > 0
+                         and (a.current_balance / c.collateral_value) <= 0.80
+                        then 0.35
+                    when a.account_type = 'MTG'
+                         and c.collateral_value is not null
+                         and c.collateral_value > 0
+                         and (a.current_balance / c.collateral_value) > 0.80
+                        then 0.50
+                    when a.account_type = 'HELC'               then 0.50
+                    when a.account_type in ('AUTO','PERS')     then 0.75
+                    when a.account_type = 'CC'                 then 0.75
+                    when a.account_type = 'LOC'                then 1.00
+                    else 1.00
+                end as risk_weight,
+                count(*) as n
+            from {self.intermediate}.int_account_metrics a
+            left join {self.raw}.collateral c
+                on a.account_id = c.account_id
+            group by 1, 2
+        ),
+        mart_weights as (
+            select account_type, risk_weight, sum(n_accounts) as n
+            from {self.marts}.mart_regulatory_rwa
+            group by 1, 2
+        )
+        select
+            coalesce(s.account_type, m.account_type) as account_type,
+            s.risk_weight as expected_weight,
+            m.risk_weight as actual_weight,
+            s.n as expected_n,
+            m.n as actual_n
+        from source_weights s
+        full outer join mart_weights m
+            on s.account_type = m.account_type
+            and s.risk_weight = m.risk_weight
+        where s.n is null or m.n is null or s.n <> m.n
+        """
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+        ok = len(rows) == 0
+        detail = "all (type, weight) pairs match" if ok else (
+            "; ".join(f"{r[0]} expected {r[1]}×{r[3]} got {r[2]}×{r[4]}" for r in rows[:5])
+        )
+        self.results.append(CheckResult(
+            "rwa_risk_weight_parity", "PASS" if ok else "FAIL", detail,
+            {"mismatches": len(rows)},
+        ))
+
+    def check_rwa_exposure_control_total(self):
+        """Total exposure in the mart must tie to sum(current_balance) from source."""
+        expected = self._scalar(
+            f"select sum(current_balance) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select sum(total_exposure) from {self.marts}.mart_regulatory_rwa"
+        )
+        diff = abs((actual or 0) - (expected or 0))
+        ok = diff <= 0.01
+        self.results.append(CheckResult(
+            "rwa_exposure_control_total", "PASS" if ok else "FAIL",
+            f"source exposure = {expected}, mart exposure = {actual}, diff = {diff:.2f}",
+            {"expected": expected, "actual": actual, "diff": diff},
+        ))
+
+    # -------------------------------------------------------------- delinquency
+    def check_delinquency_completeness(self):
+        """Sum of n_accounts in delinquency mart must equal lending accounts in source."""
+        expected = self._scalar(f"""
+            select count(*) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+        """)
+        actual = self._scalar(
+            f"select sum(n_accounts) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(CheckResult(
+            "delinquency_completeness", "PASS" if ok else "FAIL",
+            f"lending accounts = {expected}, mart accounts = {actual}",
+            {"expected": expected, "actual": actual},
+        ))
+
+    def check_delinquency_balance_control_total(self):
+        """Total balance in the delinquency mart must tie to lending balances."""
+        expected = self._scalar(f"""
+            select sum(current_balance) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+        """)
+        actual = self._scalar(
+            f"select sum(total_balance) from {self.marts}.mart_delinquency_aging"
+        )
+        diff = abs((actual or 0) - (expected or 0))
+        ok = diff <= 0.01
+        self.results.append(CheckResult(
+            "delinquency_balance_control_total", "PASS" if ok else "FAIL",
+            f"source balance = {expected}, mart balance = {actual}, diff = {diff:.2f}",
+            {"expected": expected, "actual": actual, "diff": diff},
+        ))
+
+    def check_delinquency_bucket_parity(self):
+        """Bucket assignments in the mart must match the SAS CASE re-derived from source."""
+        query = f"""
+        with source_buckets as (
+            select
+                a.account_type,
+                case
+                    when coalesce(p.max_days_past_due_ever, 0) = 0
+                        then 'Current'
+                    when coalesce(p.max_days_past_due_ever, 0) between 1 and 29
+                        then '1-29'
+                    when coalesce(p.max_days_past_due_ever, 0) between 30 and 59
+                        then '30-59'
+                    when coalesce(p.max_days_past_due_ever, 0) between 60 and 89
+                        then '60-89'
+                    when coalesce(p.max_days_past_due_ever, 0) between 90 and 119
+                        then '90-119'
+                    when coalesce(p.max_days_past_due_ever, 0) between 120 and 179
+                        then '120-179'
+                    when coalesce(p.max_days_past_due_ever, 0) >= 180
+                        then '180+'
+                    else 'Unknown'
+                end as delinq_bucket,
+                count(*) as n
+            from {self.intermediate}.int_account_metrics a
+            left join {self.raw}.payment_history p
+                on a.account_id = p.account_id
+            where a.account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            group by 1, 2
+        ),
+        mart_buckets as (
+            select account_type, delinq_bucket, sum(n_accounts) as n
+            from {self.marts}.mart_delinquency_aging
+            group by 1, 2
+        )
+        select
+            coalesce(s.account_type, m.account_type) as account_type,
+            coalesce(s.delinq_bucket, m.delinq_bucket) as delinq_bucket,
+            s.n as expected_n,
+            m.n as actual_n
+        from source_buckets s
+        full outer join mart_buckets m
+            on s.account_type = m.account_type
+            and s.delinq_bucket = m.delinq_bucket
+        where s.n is null or m.n is null or s.n <> m.n
+        """
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+        ok = len(rows) == 0
+        detail = "all (type, bucket) pairs match" if ok else (
+            "; ".join(f"{r[0]}/{r[1]} expected {r[2]} got {r[3]}" for r in rows[:5])
+        )
+        self.results.append(CheckResult(
+            "delinquency_bucket_parity", "PASS" if ok else "FAIL", detail,
+            {"mismatches": len(rows)},
+        ))
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_risk_weight_parity()
+        self.check_rwa_exposure_control_total()
+        self.check_delinquency_completeness()
+        self.check_delinquency_balance_control_total()
+        self.check_delinquency_bucket_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
