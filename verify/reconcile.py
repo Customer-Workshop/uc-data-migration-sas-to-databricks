@@ -76,6 +76,13 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _scalar_safe(self, query: str):
+        """Like _scalar but returns None on database errors (e.g. missing table)."""
+        try:
+            return self._scalar(query)
+        except Exception:
+            return None
+
     def _query(self, query: str):
         cur = self.con.cursor()
         try:
@@ -122,7 +129,7 @@ class Reconciler:
               and expiry_date   >= current_date()
             """
         )
-        actual = self._scalar(
+        actual = self._scalar_safe(
             f"select count(*) from {self.intermediate}.int_policy_valuation"
         )
         if actual is None:
@@ -143,13 +150,13 @@ class Reconciler:
 
     def check_policy_valuation_control_total(self):
         """Total earned premium ties between int and mart layers."""
-        int_total = self._scalar(
+        int_total = self._scalar_safe(
             f"""
             select coalesce(sum(ytd_earned_premium), 0)
             from {self.intermediate}.int_policy_valuation
             """
         )
-        mart_total = self._scalar(
+        mart_total = self._scalar_safe(
             f"""
             select coalesce(sum(total_earned), 0)
             from {self.marts}.mart_loss_ratios

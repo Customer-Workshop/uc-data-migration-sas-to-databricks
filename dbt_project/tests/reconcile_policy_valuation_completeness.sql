@@ -16,8 +16,8 @@ with expected_inforce as (
     select count(*) as n
     from {{ source('insurance_raw', 'policies') }}
     where policy_status = 'ACTIVE'
-      and effective_date <= current_date()
-      and expiry_date   >= current_date()
+      and effective_date <= '{{ var("curr_dt") }}'
+      and expiry_date   >= '{{ var("curr_dt") }}'
 ),
 
 model_policies as (
