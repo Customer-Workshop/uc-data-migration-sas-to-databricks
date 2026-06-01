@@ -5,7 +5,8 @@
 # interactively or scheduled via Control-M. This Makefile provides
 # a standardized developer workflow.
 
-.PHONY: install lint lint-fix compile parse test run run-staging run-intermediate run-marts ci clean help
+.PHONY: install lint lint-fix compile parse test reconcile run run-staging run-intermediate run-marts ci clean help \
+        seed teardown build demo-up demo-down deploy deploy-prod run-job destroy
 
 DBT_DIR := dbt_project
 SQLFLUFF_CONFIG := .sqlfluff
@@ -34,6 +35,9 @@ parse: ## Parse/validate dbt project (no connection required)
 test: ## Run dbt schema tests (requires Databricks connection)
 	cd $(DBT_DIR) && dbt test --target dev
 
+reconcile: ## Source→target reconciliation report for namespace NS (requires Databricks connection)
+	python verify/reconcile.py --namespace $(NS)
+
 run-staging: ## Run staging models only
 	cd $(DBT_DIR) && dbt run --select tag:staging
 
@@ -54,3 +58,42 @@ ci: lint parse ## Run full CI pipeline locally (lint + parse)
 
 clean: ## Remove dbt build artifacts
 	rm -rf $(DBT_DIR)/target $(DBT_DIR)/dbt_packages $(DBT_DIR)/logs
+
+# ---------------------------------------------------------------------------
+# Repeatable demo lifecycle (isolated, concurrent-safe DB namespaces)
+#
+# NS is the schema prefix for a run. Outputs land in <NS>_staging/_intermediate/
+# _marts/_curated, so multiple runs (NS=dev, NS=alice, ...) never collide and the
+# "before" raw data in banking_analytics.raw is never touched.
+#   make demo-up NS=alice     # seed (idempotent) + build that namespace
+#   make demo-down NS=alice   # drop only that namespace's schemas
+# Requires DATABRICKS_HOST / DATABRICKS_HTTP_PATH / DATABRICKS_TOKEN.
+# ---------------------------------------------------------------------------
+NS ?= dev
+TARGET ?= dev
+
+seed: ## Seed synthetic "before" raw data into banking_analytics.raw (idempotent)
+	python seed/generate_and_load.py
+
+teardown: ## Drop one namespace's output schemas (NS=...); raw data untouched
+	python seed/teardown.py --namespace $(NS)
+
+build: ## Build + test all models into namespace NS (DBT_SCHEMA=$(NS))
+	cd $(DBT_DIR) && DBT_SCHEMA=$(NS) dbt build --target dev
+
+demo-up: seed ## Full "after" state for namespace NS: seed + build + test
+	cd $(DBT_DIR) && DBT_SCHEMA=$(NS) dbt build --target dev
+
+demo-down: teardown ## Tear down namespace NS (alias for teardown)
+
+deploy: ## Deploy the Asset Bundle to dev (namespaced per-user, schedule paused)
+	databricks bundle deploy -t dev
+
+deploy-prod: ## Deploy the Asset Bundle to the prod target
+	databricks bundle deploy -t prod
+
+run-job: ## Trigger the deployed pipeline job (TARGET=dev|prod)
+	databricks bundle run daily_banking_pipeline -t $(TARGET)
+
+destroy: ## Revert CD: remove the deployed bundle/job (TARGET=dev|prod)
+	databricks bundle destroy -t $(TARGET) --auto-approve

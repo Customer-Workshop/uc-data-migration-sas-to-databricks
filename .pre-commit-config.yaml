@@ -12,6 +12,10 @@ repos:
         args:
           - --config
           - .sqlfluff
+          # Match CI: lint with the jinja templater, ignoring templating/parsing
+          # so dbt macro expansion doesn't require a live connection.
+          - --ignore
+          - templating,parsing
         additional_dependencies:
           - dbt-core
           - dbt-databricks
@@ -23,6 +27,12 @@ repos:
         args:
           - --config
           - .sqlfluff
+          # Match CI: ignore templating/parsing so dbt macro expansion doesn't
+          # require a live connection.
+          - --ignore
+          - templating,parsing
+          # Suppress the interactive "are you sure?" prompt so the hook can
+          # apply fixes non-interactively.
           - --force
         additional_dependencies:
           - dbt-core

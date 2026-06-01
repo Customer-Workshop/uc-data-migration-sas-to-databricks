@@ -45,7 +45,7 @@ enriched as (
             when current_balance >= 250000 then 'Y' else 'N'
         end as high_balance_flag,
 
-        -- SAS FORMAT replacement: {{ format_account_type('account_type') }}
+        -- SAS FORMAT replacement: format_account_type(account_type) macro
         {{ format_account_type('account_type') }} as account_type_desc,
         {{ format_account_status('account_status') }} as account_status_desc,
         {{ format_customer_segment('customer_segment') }} as customer_segment_desc,

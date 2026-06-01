@@ -17,3 +17,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Databricks Asset Bundles
+.databricks/
+dbt_project/.user.yml
