@@ -129,30 +129,39 @@ models:
       lookup to RAW_INS.POLICIES replaced by broadcast JOIN.
     columns:
       - name: claim_id
-        description: Primary key — unique claim identifier.
+        description: >
+          Primary key — unique claim identifier.
+          Source: CLAIM_ID from RAW_INS.CLAIMS_FEED (SAS character → STRING).
         data_tests:
           - unique
           - not_null
 
       - name: policy_id
-        description: FK to policies — validated as active during ingestion.
+        description: >
+          FK to policies table. Validated as active during ingestion via
+          broadcast join (replaces SAS hash lookup on POLICY_ID with
+          STATUS='ACTIVE' filter). Source: POLICY_ID from CLAIMS_FEED.
         data_tests:
           - not_null
 
       - name: claimant_id
-        description: FK to claimant who filed the claim.
+        description: >
+          Identifier of the person or entity filing the claim.
+          Source: CLAIMANT_ID from RAW_INS.CLAIMS_FEED (SAS character → STRING).
         data_tests:
           - not_null
 
       - name: claim_type
         description: >
-          Type of insurance claim.
+          Classification of the insurance claim (e.g., collision,
+          liability, property). Source: CLAIM_TYPE from CLAIMS_FEED.
         data_tests:
           - not_null
 
       - name: claim_status
         description: >
-          Claim processing status. Maps to SAS PROC FORMAT $CLMSTAT values.
+          Current processing status. Maps to SAS PROC FORMAT $CLMSTAT
+          values. Source: CLAIM_STATUS from CLAIMS_FEED.
         data_tests:
           - not_null
           - accepted_values:
@@ -165,16 +174,54 @@ models:
                 - REOPENED
 
       - name: claimed_amount
-        description: Amount claimed — validated to not exceed sum_insured.
+        description: >
+          Dollar amount claimed by the policyholder. Validated to not
+          exceed sum_insured. Source: CLAIMED_AMOUNT from CLAIMS_FEED
+          (SAS numeric → DOUBLE).
         data_tests:
           - not_null
 
       - name: loss_date
-        description: Date of loss — validated within policy period.
+        description: >
+          Date the insured loss event occurred. Validated to fall within
+          the policy effective period (EFFECTIVE_DATE to EXPIRATION_DATE).
+          Source: LOSS_DATE from CLAIMS_FEED (SAS date numeric → DATE).
         data_tests:
           - not_null
 
       - name: reported_date
-        description: Date the claim was reported.
+        description: >
+          Date the claim was reported to the insurer.
+          Source: REPORTED_DATE from CLAIMS_FEED (SAS date numeric → DATE).
         data_tests:
           - not_null
+
+      - name: policy_type
+        description: >
+          Line of business for the associated policy (e.g., AUTO, HOME,
+          RENT). Enriched via broadcast join to RAW_INS.POLICIES.
+          Source: POLICY_TYPE (SAS character → STRING).
+
+      - name: effective_date
+        description: >
+          Start date of the policy coverage period. Used for loss-date
+          validation. Source: EFFECTIVE_DATE from POLICIES
+          (SAS date numeric → DATE).
+
+      - name: expiration_date
+        description: >
+          End date of the policy coverage period. Used for loss-date
+          validation. Source: EXPIRATION_DATE from POLICIES
+          (SAS date numeric → DATE).
+
+      - name: sum_insured
+        description: >
+          Maximum coverage amount on the policy. Used to validate
+          claimed_amount and as adjudication threshold (25% rule).
+          Source: SUM_INSURED from POLICIES (SAS numeric → DOUBLE).
+
+      - name: deductible
+        description: >
+          Policyholder's deductible amount, subtracted from the approved
+          payout. Source: DEDUCTIBLE from POLICIES
+          (SAS numeric → DOUBLE).

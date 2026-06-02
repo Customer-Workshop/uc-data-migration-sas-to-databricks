@@ -67,36 +67,114 @@ models:
       and IF/THEN routing replaced by broadcast JOIN and SQL CASE.
     columns:
       - name: claim_id
-        description: Primary key — unique claim identifier.
+        description: >
+          Primary key — unique claim identifier, carried from stg_claims.
+          Source: CLAIM_ID (STRING).
         data_tests:
           - unique
           - not_null
 
       - name: policy_id
+        description: >
+          Policy identifier — carried from stg_claims.
+          Source: POLICY_ID (STRING).
         data_tests:
           - not_null
 
-      - name: adjudication_result
+      - name: claimant_id
         description: >
-          Auto-adjudication outcome. Maps to SAS routing targets:
-          AUTO_ADJUDICATED (APPR/DENY) or MANUAL_REVIEW (PEND).
+          Claimant identifier — carried from stg_claims.
+          Source: CLAIMANT_ID (STRING).
+
+      - name: claim_type
+        description: >
+          Claim classification — carried from stg_claims.
+          Source: CLAIM_TYPE (STRING).
+
+      - name: claimed_amount
+        description: >
+          Original dollar amount claimed by the policyholder, carried
+          from stg_claims. Source: CLAIMED_AMOUNT (DOUBLE).
         data_tests:
           - not_null
-          - accepted_values:
-              values: ['APPR', 'DENY', 'PEND']
+
+      - name: loss_date
+        description: >
+          Date of the insured loss event — carried from stg_claims.
+          Source: LOSS_DATE (DATE).
+
+      - name: reported_date
+        description: >
+          Date the claim was reported — carried from stg_claims.
+          Source: REPORTED_DATE (DATE).
+
+      - name: claim_status
+        description: >
+          Current processing status — carried from stg_claims.
+          Source: CLAIM_STATUS (STRING).
+
+      - name: policy_type
+        description: >
+          Policy line of business — carried from stg_claims. Used in
+          auto-approval rules (AUTO, HOME, RENT eligible).
+          Source: POLICY_TYPE (STRING).
+
+      - name: sum_insured
+        description: >
+          Maximum policy coverage — used in the 25% threshold rule.
+          Source: SUM_INSURED (DOUBLE).
+
+      - name: deductible
+        description: >
+          Policyholder deductible — subtracted from claimed_amount to
+          compute approved_amount. Source: DEDUCTIBLE (DOUBLE).
+
+      - name: fraud_score
+        description: >
+          Numeric fraud propensity score from the fraud model, joined
+          via left join on POLICY_ID + CLAIMANT_ID from
+          TERA_DW.FRAUD_INDICATORS. NULL when no match (INT).
+
+      - name: indicator_flags
+        description: >
+          Fraud indicator codes from TERA_DW.FRAUD_INDICATORS.
+          NULL when no match (STRING).
 
       - name: fraud_risk
         description: >
-          Fraud risk level derived from fraud_score thresholds.
-          HIGH >= 80, MEDIUM >= 50, LOW < 50.
+          Fraud risk tier derived from fraud_score thresholds:
+          HIGH (≥ 80), MEDIUM (≥ 50), LOW (< 50). Defaults to LOW
+          when fraud_score is NULL. Replaces SAS IF/THEN with SQL CASE.
         data_tests:
           - not_null
           - accepted_values:
               values: ['HIGH', 'MEDIUM', 'LOW']
 
-      - name: claimed_amount
+      - name: adjudication_result
+        description: >
+          Auto-adjudication outcome. APPR = auto-approved, DENY =
+          auto-denied (high fraud risk), PEND = routed to manual review.
+          Maps to SAS routing targets: AUTO_ADJUDICATED vs MANUAL_REVIEW.
         data_tests:
           - not_null
+          - accepted_values:
+              values: ['APPR', 'DENY', 'PEND']
+
+      - name: adjudication_reason
+        description: >
+          Human-readable explanation of the adjudication decision.
+          Built from multiple conditions via concat_ws (replaces SAS
+          catx / ifc logic). Always populated (STRING).
+
+      - name: approved_amount
+        description: >
+          Approved payout amount. GREATEST(0, claimed_amount - deductible)
+          for APPR; 0 for DENY; NULL for PEND. Source: derived (DOUBLE).
+
+      - name: processing_date
+        description: >
+          Date the claim was processed through the adjudication pipeline.
+          Replaces SAS macro variable &proc_date. Source: derived (DATE).
 
   - name: int_policy_valuation
     description: >
