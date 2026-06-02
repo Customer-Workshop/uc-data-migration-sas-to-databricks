@@ -165,6 +165,8 @@ models:
           Human-readable explanation of the adjudication decision.
           Built from multiple conditions via concat_ws (replaces SAS
           catx / ifc logic). Always populated (STRING).
+        data_tests:
+          - not_null
 
       - name: approved_amount
         description: >
@@ -175,6 +177,8 @@ models:
         description: >
           Date the claim was processed through the adjudication pipeline.
           Replaces SAS macro variable &proc_date. Source: derived (DATE).
+        data_tests:
+          - not_null
 
   - name: int_policy_valuation
     description: >
