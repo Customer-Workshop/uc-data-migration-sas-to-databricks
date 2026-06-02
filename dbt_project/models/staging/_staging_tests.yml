@@ -201,27 +201,37 @@ models:
           Line of business for the associated policy (e.g., AUTO, HOME,
           RENT). Enriched via broadcast join to RAW_INS.POLICIES.
           Source: POLICY_TYPE (SAS character → STRING).
+        data_tests:
+          - not_null
 
       - name: effective_date
         description: >
           Start date of the policy coverage period. Used for loss-date
           validation. Source: EFFECTIVE_DATE from POLICIES
           (SAS date numeric → DATE).
+        data_tests:
+          - not_null
 
       - name: expiration_date
         description: >
           End date of the policy coverage period. Used for loss-date
           validation. Source: EXPIRATION_DATE from POLICIES
           (SAS date numeric → DATE).
+        data_tests:
+          - not_null
 
       - name: sum_insured
         description: >
           Maximum coverage amount on the policy. Used to validate
           claimed_amount and as adjudication threshold (25% rule).
           Source: SUM_INSURED from POLICIES (SAS numeric → DOUBLE).
+        data_tests:
+          - not_null
 
       - name: deductible
         description: >
           Policyholder's deductible amount, subtracted from the approved
           payout. Source: DEDUCTIBLE from POLICIES
           (SAS numeric → DOUBLE).
+        data_tests:
+          - not_null
