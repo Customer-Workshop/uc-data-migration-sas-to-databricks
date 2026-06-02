@@ -17,13 +17,17 @@ this skill says *how* to do it here (exact commands, paths, namespaces).
 - SAS source estate (read-only): the `ts-sas-legacy-analytics` repo.
 - Target dbt project: `dbt_project/` — `models/staging`, `models/intermediate`,
   `models/marts`; macros in `dbt_project/macros/`.
+- Source definitions: `dbt_project/models/staging/_staging_sources.yml`.
 - PySpark jobs: `src/pyspark/`.
 - Reconciliation controls:
   - dbt singular tests (fail the build if they return rows):
     `dbt_project/tests/reconcile_*.sql`.
-  - Cross-engine / report checks: `verify/reconcile.py`.
+  - Cross-engine / report checks: `verify/reconcile.py` (add methods on
+    `Reconciler` class).
 - Connection is env-var based (`dbt_project/profiles.yml`): `DATABRICKS_HOST`,
   `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`. Catalog is `banking_analytics`.
+- Construct-level SAS→dbt mapping reference:
+  [`docs/SAS_TO_DBT_MIGRATION_MAP.md`](docs/SAS_TO_DBT_MIGRATION_MAP.md).
 
 ## Namespaces (isolated, concurrent-safe)
 

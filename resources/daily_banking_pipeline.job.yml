@@ -1,0 +1,122 @@
+# Databricks Workflow job definition — daily banking analytics pipeline.
+#
+# Replaces the SAS Control-M scheduled jobs (run_daily_banking.sas,
+# claims_processing.sas) with a declarative DAG of dbt and PySpark tasks.
+#
+# Task graph:
+#   dbt_staging ──► dbt_intermediate ──► dbt_marts ──► dbt_test
+#       └──────────► pyspark_claims (parallel after staging)
+
+resources:
+  jobs:
+    daily_banking_pipeline:
+      name: daily_banking_pipeline
+      description: >
+        Daily banking and insurance analytics pipeline. Replaces the SAS
+        Control-M scheduled jobs with dbt layer builds and PySpark processing.
+        See docs/CICD_NARRATIVE.md for the full migration mapping.
+
+      max_concurrent_runs: 1
+
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: America/New_York
+        pause_status: UNPAUSED
+
+      tags:
+        team: data-engineering
+        domain: banking-analytics
+        migration_source: sas-control-m
+
+      tasks:
+        - task_key: dbt_staging
+          description: >
+            Load and validate raw data into staging layer. Replaces SAS
+            load_customer_accounts.sas and daily_transaction_processing.sas
+            validation steps.
+          dbt_task:
+            project_directory: /Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project
+            commands:
+              - dbt deps
+              - dbt run --select tag:staging --target prod --vars '{dbt_schema: ${var.dbt_schema}}'
+            catalog: banking_analytics
+            schema: ${var.dbt_schema}
+          timeout_seconds: 3600
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_intermediate
+          description: >
+            Compute derived metrics and business logic. Replaces SAS DATA step
+            computing account metrics, fraud screening, and adjudication.
+          depends_on:
+            - task_key: dbt_staging
+          dbt_task:
+            project_directory: /Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project
+            commands:
+              - dbt run --select tag:intermediate --target prod --vars '{dbt_schema: ${var.dbt_schema}}'
+            catalog: banking_analytics
+            schema: ${var.dbt_schema}
+          timeout_seconds: 3600
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_marts
+          description: >
+            Build final analytical outputs. Replaces SAS credit_risk_scoring.sas,
+            monthly_regulatory_reporting.sas, and customer_profitability.sas.
+          depends_on:
+            - task_key: dbt_intermediate
+          dbt_task:
+            project_directory: /Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project
+            commands:
+              - dbt run --select tag:marts --target prod --vars '{dbt_schema: ${var.dbt_schema}}'
+            catalog: banking_analytics
+            schema: ${var.dbt_schema}
+          timeout_seconds: 7200
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_test
+          description: >
+            Run all schema and reconciliation tests. SAS had no equivalent —
+            QA was manual PROC PRINT/PROC SQL spot checks.
+          depends_on:
+            - task_key: dbt_marts
+          dbt_task:
+            project_directory: /Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project
+            commands:
+              - dbt test --target prod --vars '{dbt_schema: ${var.dbt_schema}}'
+            catalog: banking_analytics
+            schema: ${var.dbt_schema}
+          timeout_seconds: 1800
+          max_retries: 0
+
+        - task_key: pyspark_claims
+          description: >
+            PySpark claims processing job. Runs in parallel after staging,
+            reading from staging/intermediate and writing to the curated schema.
+            Replaces the procedural DATA-step logic in claims_processing.sas
+            (hash lookup, multi-output routing to claims_register, fraud_alerts,
+            claims_review_queue).
+          depends_on:
+            - task_key: dbt_staging
+          spark_python_task:
+            python_file: src/pyspark/claims_processing.py
+            parameters:
+              - --namespace
+              - ${var.dbt_schema}
+              - --catalog
+              - banking_analytics
+          timeout_seconds: 3600
+          max_retries: 1
+          retry_on_timeout: true
+
+      email_notifications:
+        on_failure:
+          - data-engineering-alerts@example.com
+        no_alert_for_skipped_runs: true
+
+      parameters:
+        - name: dbt_schema
+          default: ${var.dbt_schema}

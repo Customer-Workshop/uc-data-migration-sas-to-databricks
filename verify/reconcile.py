@@ -100,9 +100,67 @@ class Reconciler:
             )
         )
 
+    def check_risk_score_completeness(self):
+        """Every in-scope account with a credit product must appear in mart_risk_scores."""
+        raw_credit = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+            """
+        )
+        scored = self._scalar(f"select count(*) from {self.marts}.mart_risk_scores")
+        ok = raw_credit == scored
+        self.results.append(
+            CheckResult(
+                "risk_score_completeness",
+                "PASS" if ok else "FAIL",
+                f"credit accounts in int_account_metrics = {raw_credit}, "
+                f"rows in mart_risk_scores = {scored}",
+                {"expected": raw_credit, "actual": scored},
+            )
+        )
+
+    def check_transaction_control_total(self):
+        """SUM of transaction amounts must tie between raw and mart."""
+        raw_sum = self._scalar(
+            f"""
+            select coalesce(sum(transaction_amount), 0)
+            from {self.raw}.daily_transactions
+            where transaction_id is not null
+              and account_id is not null
+              and transaction_amount is not null
+              and abs(transaction_amount) <= 10000000
+              and transaction_type in (
+                  'DEP','WDR','TRF','PMT','FEE','INT','ADJ','REV','CHG','REF'
+              )
+              and transaction_date <= current_date()
+            """
+        )
+        mart_sum = self._scalar(
+            f"""
+            select coalesce(sum(transaction_amount), 0)
+            from {self.marts}.mart_daily_transactions
+            """
+        )
+        # Compare with tolerance for floating-point rounding
+        diff = abs((raw_sum or 0) - (mart_sum or 0))
+        ok = diff < 0.01
+        self.results.append(
+            CheckResult(
+                "transaction_control_total",
+                "PASS" if ok else "FAIL",
+                f"raw SUM(transaction_amount) = {raw_sum}, "
+                f"mart SUM(transaction_amount) = {mart_sum}, diff = {diff}",
+                {"raw_sum": raw_sum, "mart_sum": mart_sum, "diff": diff},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_risk_score_completeness()
+        self.check_transaction_control_total()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 

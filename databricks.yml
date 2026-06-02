@@ -1,0 +1,48 @@
+# Databricks Asset Bundle configuration for the SAS-to-Databricks migration.
+#
+# Asset Bundles replace the SAS Management Console .spk deployment model with
+# declarative, version-controlled infrastructure-as-code that lives alongside
+# the dbt project. `databricks bundle deploy` pushes job definitions, cluster
+# configs, and permissions to the workspace; `databricks bundle destroy` reverts
+# them cleanly.
+#
+# Usage:
+#   make deploy          # databricks bundle deploy -t dev
+#   make deploy-prod     # databricks bundle deploy -t prod
+#   make run-job         # trigger the pipeline job
+#   make destroy         # revert the deployed bundle
+
+bundle:
+  name: sas-to-databricks-migration
+
+variables:
+  dbt_schema:
+    description: >
+      Namespace prefix for dbt output schemas. Each attendee / CI run gets its
+      own namespace (e.g. dev, alice, ci_12345) so runs never collide.
+    default: dev
+
+workspace:
+  host: ${DATABRICKS_HOST}
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
+    variables:
+      dbt_schema: dev
+    resources:
+      jobs:
+        daily_banking_pipeline:
+          schedule:
+            pause_status: PAUSED
+
+  prod:
+    workspace:
+      root_path: /Workspace/Repos/production/uc-data-migration-sas-to-databricks
+    variables:
+      dbt_schema: prod
