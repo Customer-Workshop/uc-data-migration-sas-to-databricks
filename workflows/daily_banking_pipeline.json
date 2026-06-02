@@ -11,7 +11,7 @@
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
           "dbt deps",
-          "dbt run --select tag:staging --target {{job.parameters.dbt_target}}"
+          "dbt run --select tag:staging --exclude stg_claims --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
@@ -74,7 +74,7 @@
       "dbt_task": {
         "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
         "commands": [
-          "dbt run --select tag:intermediate --target {{job.parameters.dbt_target}}"
+          "dbt run --select tag:intermediate --exclude int_claims_adjudication --target {{job.parameters.dbt_target}}"
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
