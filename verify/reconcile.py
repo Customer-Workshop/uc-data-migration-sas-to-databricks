@@ -100,9 +100,123 @@ class Reconciler:
             )
         )
 
+    def check_claims_completeness(self):
+        """Valid claims must equal the documented in-scope raw population.
+
+        claims_processing.sas (Step 1) keeps only claims whose policy is ACTIVE,
+        whose loss date is within the policy period, and whose claimed amount does
+        not exceed the sum insured. stg_claims reproduces that scope.
+        """
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope raw claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_control_total(self):
+        """SUM(claimed_amount) over the in-scope population must tie out to source."""
+        expected = self._scalar(
+            f"""
+            select coalesce(sum(c.claimed_amount), 0)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(claimed_amount), 0) from {self.staging}.stg_claims"
+        )
+        ok = expected is not None and actual is not None and abs(actual - expected) <= 0.01
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"source claimed_amount = {expected}, model claimed_amount = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_parity(self):
+        """Every FRAUD_RISK / ADJUDICATION_RESULT branch must match the SAS source.
+
+        Re-derives both mappings from the raw inputs using the SAS thresholds
+        value-for-value and counts per-claim divergences from
+        int_claims_adjudication. Zero divergences == parity.
+        """
+        mismatches = self._scalar(
+            f"""
+            with expected_fraud as (
+                select
+                    s.claim_id,
+                    s.claimed_amount,
+                    s.sum_insured,
+                    s.policy_type,
+                    case
+                        when f.fraud_score >= 80 then 'HIGH'
+                        when f.fraud_score >= 50 then 'MEDIUM'
+                        else 'LOW'
+                    end as fraud_risk
+                from {self.staging}.stg_claims s
+                left join {self.raw}.fraud_indicators f on s.claim_id = f.claim_id
+            ),
+            expected as (
+                select
+                    claim_id,
+                    fraud_risk,
+                    case
+                        when fraud_risk = 'HIGH' then 'DENY'
+                        when fraud_risk = 'LOW'
+                            and claimed_amount <= 5000
+                            and policy_type in ('AUTO', 'HOME', 'RENT') then 'APPR'
+                        when fraud_risk = 'LOW'
+                            and claimed_amount <= sum_insured * 0.25
+                            and claimed_amount <= 50000 then 'APPR'
+                        else 'PEND'
+                    end as adjudication_result
+                from expected_fraud
+            )
+            select count(*)
+            from expected e
+            join {self.intermediate}.int_claims_adjudication m on e.claim_id = m.claim_id
+            where e.fraud_risk <> m.fraud_risk
+               or e.adjudication_result <> m.adjudication_result
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_parity",
+                "PASS" if ok else "FAIL",
+                f"per-claim mapping divergences (fraud_risk / adjudication) = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_control_total()
+        self.check_claims_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
