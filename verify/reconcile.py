@@ -108,9 +108,9 @@ class Reconciler:
             select count(*)
             from {self.raw}.claims c
             inner join {self.raw}.policies p on c.policy_id = p.policy_id
-            where p.status = 'ACTIVE'
+            where p.policy_status = 'ACTIVE'
               and c.loss_date >= p.effective_date
-              and c.loss_date <= p.expiration_date
+              and c.loss_date <= p.expiry_date
               and c.claimed_amount <= p.sum_insured
             """
         )
@@ -132,9 +132,9 @@ class Reconciler:
             select coalesce(sum(c.claimed_amount), 0)
             from {self.raw}.claims c
             inner join {self.raw}.policies p on c.policy_id = p.policy_id
-            where p.status = 'ACTIVE'
+            where p.policy_status = 'ACTIVE'
               and c.loss_date >= p.effective_date
-              and c.loss_date <= p.expiration_date
+              and c.loss_date <= p.expiry_date
               and c.claimed_amount <= p.sum_insured
             """
         )

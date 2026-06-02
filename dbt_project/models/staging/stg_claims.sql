@@ -29,11 +29,13 @@ active_policies as (
         policy_id,
         policy_type,
         effective_date,
-        expiration_date,
+        -- SAS: EXPIRATION_DATE → Databricks column is expiry_date
+        expiry_date as expiration_date,
         sum_insured,
         deductible
     from {{ source('insurance_raw', 'policies') }}
-    where status = 'ACTIVE'
+    -- SAS: where=(STATUS='ACTIVE') → Databricks column is policy_status
+    where policy_status = 'ACTIVE'
 ),
 
 validated as (

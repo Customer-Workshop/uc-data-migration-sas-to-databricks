@@ -13,9 +13,9 @@ with source_total as (
     from {{ source('insurance_raw', 'claims') }} c
     inner join {{ source('insurance_raw', 'policies') }} p
         on c.policy_id = p.policy_id
-    where p.status = 'ACTIVE'
+    where p.policy_status = 'ACTIVE'
       and c.loss_date >= p.effective_date
-      and c.loss_date <= p.expiration_date
+      and c.loss_date <= p.expiry_date
       and c.claimed_amount <= p.sum_insured
 ),
 
