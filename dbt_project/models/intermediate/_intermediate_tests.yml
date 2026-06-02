@@ -135,3 +135,58 @@ models:
         data_tests:
           - accepted_values:
               values: ['Y', 'N']
+
+  - name: int_customer_interest_income
+    description: >
+      Per-customer interest income, deposit cost, account count, and total
+      relationship balance from the daily account snapshot. Migrated from
+      customer_profitability.sas (Step 1: WORK.INTEREST_INCOME).
+    columns:
+      - name: customer_id
+        description: Primary key — one row per customer.
+        data_tests:
+          - unique
+          - not_null
+      - name: lending_income
+        description: Sum of bal*rate/12 for lending account types.
+        data_tests:
+          - not_null
+      - name: deposit_cost
+        description: Sum of bal*rate/12 for deposit account types.
+        data_tests:
+          - not_null
+      - name: num_accounts
+        description: Distinct account count per customer.
+        data_tests:
+          - not_null
+
+  - name: int_customer_fee_income
+    description: >
+      Per-customer fee income, interest credited, and transaction volume from
+      the curated transaction feed. Migrated from customer_profitability.sas
+      (Step 2: WORK.FEE_INCOME).
+    columns:
+      - name: customer_id
+        description: Primary key — one row per customer with transactions.
+        data_tests:
+          - unique
+          - not_null
+      - name: fee_income
+        description: Sum of abs(amount) for FEE transactions.
+        data_tests:
+          - not_null
+
+  - name: int_customer_ecl
+    description: >
+      Per-customer expected credit loss at the latest score date. Migrated from
+      customer_profitability.sas (Step 3: WORK.ECL).
+    columns:
+      - name: customer_id
+        description: Primary key — one row per customer with risk scores.
+        data_tests:
+          - unique
+          - not_null
+      - name: total_ecl
+        description: Sum of expected_loss across the customer's scored accounts.
+        data_tests:
+          - not_null

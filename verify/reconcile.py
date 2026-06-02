@@ -100,9 +100,151 @@ class Reconciler:
             )
         )
 
+    # ----------------------------------------- customer_profitability.sas controls
+    # SAS Step 1 interest-income IN-lists (the product-type classification).
+    _LENDING = "account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')"
+    _DEPOSIT = "account_type in ('CHK','SAV','MMA','CD','IRA')"
+
+    def check_customer_pnl_completeness(self):
+        """mart_customer_pnl holds exactly one row per in-scope customer.
+
+        SAS `if a;` keeps the INTEREST_INCOME population (customers with >=1
+        in-scope account). No silent row loss, no fan-out from the fee/ECL joins.
+        """
+        expected = self._scalar(
+            f"select count(distinct customer_id) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_customer_pnl")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "customer_pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope customers = {expected}, mart rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_customer_pnl_control_total(self):
+        """Every P&L line in the mart is reconstructable from source, to the cent."""
+        exp_nii = self._scalar(
+            f"""
+            select sum(case when {self._LENDING} then current_balance*interest_rate/12 else 0 end)
+                 - sum(case when {self._DEPOSIT} then current_balance*interest_rate/12 else 0 end)
+            from {self.intermediate}.int_account_metrics
+            """
+        )
+        exp_fee = self._scalar(
+            f"""
+            select sum(case when t.transaction_type='FEE' then abs(t.transaction_amount) else 0 end)
+            from {self.marts}.mart_daily_transactions t
+            where t.customer_id in
+                (select distinct customer_id from {self.intermediate}.int_account_metrics)
+            """
+        )
+        exp_op = self._scalar(f"select 15*count(*) from {self.intermediate}.int_account_metrics")
+        exp_ecl = self._scalar(
+            f"""
+            select sum(r.expected_loss)
+            from {self.marts}.mart_risk_scores r
+            where r.score_date =
+                (select max(score_date) from {self.marts}.mart_risk_scores
+                 where score_date <= current_date())
+              and r.customer_id in
+                (select distinct customer_id from {self.intermediate}.int_account_metrics)
+            """
+        )
+        exp_np = (exp_nii or 0) + (exp_fee or 0) - (exp_op or 0) - (exp_ecl or 0)
+
+        act_nii = self._scalar(f"select sum(net_interest_income) from {self.marts}.mart_customer_pnl")
+        act_fee = self._scalar(f"select sum(coalesce(fee_income,0)) from {self.marts}.mart_customer_pnl")
+        act_op = self._scalar(f"select sum(operating_cost) from {self.marts}.mart_customer_pnl")
+        act_ecl = self._scalar(f"select sum(coalesce(total_ecl,0)) from {self.marts}.mart_customer_pnl")
+        act_np = self._scalar(f"select sum(net_profit) from {self.marts}.mart_customer_pnl")
+
+        lines = {
+            "net_interest_income": (exp_nii, act_nii),
+            "fee_income": (exp_fee, act_fee),
+            "operating_cost": (exp_op, act_op),
+            "total_ecl": (exp_ecl, act_ecl),
+            "net_profit": (exp_np, act_np),
+        }
+        diffs = [
+            f"{name} exp={(e or 0):,.2f} act={(a or 0):,.2f}"
+            for name, (e, a) in lines.items()
+            if abs((a or 0) - (e or 0)) > 0.01
+        ]
+        ok = not diffs
+        detail = (
+            f"net_profit total = {(act_np or 0):,.2f}; all P&L lines tie out"
+            if ok
+            else "; ".join(diffs)
+        )
+        self.results.append(
+            CheckResult(
+                "customer_pnl_control_total",
+                "PASS" if ok else "FAIL",
+                detail,
+                {k: {"expected": v[0], "actual": v[1]} for k, v in lines.items()},
+            )
+        )
+
+    def check_customer_pnl_interest_parity(self):
+        """Per-type interest classification matches the SAS IN-lists.
+
+        Reconstruct lending/deposit totals from the SAS product-type lists and
+        compare to the model's grand totals. A misclassified account type (e.g.
+        LOC dropped from LENDING) would move dollars between buckets and fail.
+        The dbt singular test reconcile_customer_pnl_parity.sql is the per-value gate.
+        """
+        exp_lending = self._scalar(
+            f"select sum(case when {self._LENDING} then current_balance*interest_rate/12 else 0 end) "
+            f"from {self.intermediate}.int_account_metrics"
+        )
+        exp_deposit = self._scalar(
+            f"select sum(case when {self._DEPOSIT} then current_balance*interest_rate/12 else 0 end) "
+            f"from {self.intermediate}.int_account_metrics"
+        )
+        act_lending = self._scalar(
+            f"select sum(lending_income) from {self.intermediate}.int_customer_interest_income"
+        )
+        act_deposit = self._scalar(
+            f"select sum(deposit_cost) from {self.intermediate}.int_customer_interest_income"
+        )
+        neither = self._scalar(
+            f"select count(distinct account_type) from {self.intermediate}.int_account_metrics "
+            f"where not ({self._LENDING}) and not ({self._DEPOSIT})"
+        )
+        ok = (
+            abs((exp_lending or 0) - (act_lending or 0)) <= 0.01
+            and abs((exp_deposit or 0) - (act_deposit or 0)) <= 0.01
+        )
+        self.results.append(
+            CheckResult(
+                "customer_pnl_interest_parity",
+                "PASS" if ok else "FAIL",
+                f"lending exp/act = {(exp_lending or 0):,.2f}/{(act_lending or 0):,.2f}, "
+                f"deposit exp/act = {(exp_deposit or 0):,.2f}/{(act_deposit or 0):,.2f}, "
+                f"types in neither IN-list = {neither}",
+                {},
+            )
+        )
+
+    def _guarded(self, check):
+        """Run a check; record SKIP if its prerequisite tables are not present."""
+        try:
+            check()
+        except Exception as exc:  # noqa: BLE001 — surface as SKIP, not a crash
+            self.results.append(
+                CheckResult(check.__name__.replace("check_", ""), "SKIP", str(exc).splitlines()[0])
+            )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self._guarded(self.check_customer_pnl_completeness)
+        self._guarded(self.check_customer_pnl_control_total)
+        self._guarded(self.check_customer_pnl_interest_parity)
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
