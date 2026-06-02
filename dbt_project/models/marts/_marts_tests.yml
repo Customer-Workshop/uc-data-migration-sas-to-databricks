@@ -173,6 +173,59 @@ models:
         data_tests:
           - not_null
 
+  - name: mart_claims_register
+    description: >
+      Final claims register combining auto-adjudicated and manually-reviewed
+      claims. Migrated from claims_processing.sas (Step 4). PROC APPEND to
+      STG_INS.CLAIMS_REGISTER replaced by materialized table.
+    columns:
+      - name: claim_id
+        description: Primary key — unique claim identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: adjudication_result
+        description: >
+          Auto-adjudication outcome. Faithfully reproduces SAS DATA step
+          IF/THEN routing (APPR/DENY/PEND).
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['APPR', 'DENY', 'PEND']
+
+      - name: processing_status
+        description: >
+          Claim processing status (= adjudication_result). SAS: CLAIM_STATUS.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['APPR', 'DENY', 'PEND']
+
+      - name: processing_status_desc
+        description: >
+          Human-readable processing status. Replacement for SAS $CLMSTAT format.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Approved', 'Denied', 'Pending Approval']
+
+      - name: processing_date
+        description: Date the claim was processed through adjudication.
+        data_tests:
+          - not_null
+
+      - name: fraud_risk
+        description: Fraud risk level (HIGH/MEDIUM/LOW).
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['HIGH', 'MEDIUM', 'LOW']
+
+      - name: claimed_amount
+        data_tests:
+          - not_null
+
   - name: mart_loss_ratios
     description: >
       Loss ratio summary by line of business (policy type).

@@ -100,9 +100,128 @@ class Reconciler:
             )
         )
 
+    def check_claims_completeness(self):
+        """Validated claims count must match raw in-scope population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.intermediate}.int_claims_adjudication")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"valid raw claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Every adjudication result must match source-faithful routing rules."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_claims_adjudication
+            where
+                (fraud_risk = 'HIGH' and adjudication_result <> 'DENY')
+                or (fraud_risk = 'LOW' and claimed_amount <= 5000
+                    and policy_type in ('AUTO', 'HOME', 'RENT')
+                    and adjudication_result <> 'APPR')
+                or (fraud_risk = 'LOW'
+                    and not (claimed_amount <= 5000 and policy_type in ('AUTO', 'HOME', 'RENT'))
+                    and claimed_amount <= sum_insured * 0.25
+                    and claimed_amount <= 50000
+                    and adjudication_result <> 'APPR')
+                or (fraud_risk <> 'HIGH'
+                    and not (fraud_risk = 'LOW' and claimed_amount <= 5000
+                             and policy_type in ('AUTO', 'HOME', 'RENT'))
+                    and not (fraud_risk = 'LOW' and claimed_amount <= sum_insured * 0.25
+                             and claimed_amount <= 50000)
+                    and adjudication_result <> 'PEND')
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"adjudication routing mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
+    def check_claims_control_total(self):
+        """Total approved amount must tie out between raw re-derivation and model."""
+        expected = self._scalar(
+            f"""
+            select sum(approved)
+            from (
+                select
+                    case
+                        when fi.fraud_risk = 'LOW'
+                             and c.claimed_amount <= 5000
+                             and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                            then greatest(0, c.claimed_amount - p.deductible)
+                        when fi.fraud_risk = 'LOW'
+                             and not (c.claimed_amount <= 5000
+                                      and p.policy_type in ('AUTO', 'HOME', 'RENT'))
+                             and c.claimed_amount <= p.sum_insured * 0.25
+                             and c.claimed_amount <= 50000
+                            then greatest(0, c.claimed_amount - p.deductible)
+                        else null
+                    end as approved
+                from {self.raw}.claims c
+                inner join {self.raw}.policies p on c.policy_id = p.policy_id
+                left join (
+                    select
+                        claim_id,
+                        case
+                            when fraud_score >= 0.80 then 'HIGH'
+                            when fraud_score >= 0.50 then 'MEDIUM'
+                            else 'LOW'
+                        end as fraud_risk
+                    from {self.raw}.fraud_indicators
+                ) fi on c.claim_id = fi.claim_id
+                where p.policy_status = 'ACTIVE'
+                  and c.loss_date >= p.effective_date
+                  and c.loss_date <= p.expiry_date
+                  and c.claimed_amount <= p.sum_insured
+            )
+            """
+        )
+        actual = self._scalar(
+            f"""
+            select sum(approved_amount)
+            from {self.intermediate}.int_claims_adjudication
+            where adjudication_result = 'APPR'
+            """
+        )
+        expected = expected or 0
+        actual = actual or 0
+        ok = abs(expected - actual) < 0.01
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"expected approved total = {expected}, model approved total = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_adjudication_parity()
+        self.check_claims_control_total()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
