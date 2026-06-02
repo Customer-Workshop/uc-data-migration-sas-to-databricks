@@ -100,9 +100,92 @@ class Reconciler:
             )
         )
 
+    def check_claims_completeness(self):
+        """Model claims must equal the in-scope raw population (active policy,
+        loss date in period, claimed amount <= sum insured)."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiration_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.staging}.stg_claims")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope raw claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_control_total(self):
+        """Total claimed_amount must tie between source and adjudication model."""
+        source_total = self._scalar(
+            f"""
+            select coalesce(sum(c.claimed_amount), 0)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiration_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        model_total = self._scalar(
+            f"select coalesce(sum(claimed_amount), 0) from {self.intermediate}.int_claims_adjudication"
+        )
+        diff = abs(float(source_total or 0) - float(model_total or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"source total = {source_total}, model total = {model_total}, diff = {diff}",
+                {"source": source_total, "model": model_total, "diff": diff},
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Every row's adjudication_result must match the SAS routing logic."""
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_claims_adjudication
+            where adjudication_result <> case
+                when fraud_risk = 'HIGH' then 'DENY'
+                when fraud_risk = 'LOW'
+                     and claimed_amount <= 5000
+                     and policy_type in ('AUTO','HOME','RENT') then 'APPR'
+                when fraud_risk = 'LOW'
+                     and claimed_amount <= sum_insured * 0.25
+                     and claimed_amount <= 50000 then 'APPR'
+                else 'PEND'
+            end
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"rows with mismatched adjudication_result = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_control_total()
+        self.check_claims_adjudication_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
