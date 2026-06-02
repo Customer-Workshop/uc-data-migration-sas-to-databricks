@@ -100,9 +100,97 @@ class Reconciler:
             )
         )
 
+    def check_claims_completeness(self):
+        """Validated claims count must match raw in-scope population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p on c.policy_id = p.policy_id
+            where p.policy_status = 'ACTIVE'
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and c.claimed_amount <= p.sum_insured
+            """
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_claims_adjudication"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"valid raw claims = {expected}, model claims = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Per-result counts must match source-faithful routing rules."""
+        mismatches = self._scalar(
+            f"""
+            with raw_adjudicated as (
+                select
+                    case
+                        when fi.fraud_risk = 'HIGH' then 'DENY'
+                        when fi.fraud_risk = 'LOW'
+                             and c.claimed_amount <= 5000
+                             and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                            then 'APPR'
+                        when fi.fraud_risk = 'LOW'
+                             and c.claimed_amount <= p.sum_insured * 0.25
+                             and c.claimed_amount <= 50000
+                            then 'APPR'
+                        else 'PEND'
+                    end as expected_result
+                from {self.raw}.claims c
+                inner join {self.raw}.policies p on c.policy_id = p.policy_id
+                left join (
+                    select claim_id,
+                           case when fraud_score >= 0.80 then 'HIGH'
+                                when fraud_score >= 0.50 then 'MEDIUM'
+                                else 'LOW' end as fraud_risk
+                    from {self.raw}.fraud_indicators
+                ) fi on c.claim_id = fi.claim_id
+                where p.policy_status = 'ACTIVE'
+                  and c.loss_date >= p.effective_date
+                  and c.loss_date <= p.expiry_date
+                  and c.claimed_amount <= p.sum_insured
+            ),
+            expected_counts as (
+                select expected_result, count(*) as n
+                from raw_adjudicated group by expected_result
+            ),
+            model_counts as (
+                select adjudication_result, count(*) as n
+                from {self.intermediate}.int_claims_adjudication
+                group by adjudication_result
+            )
+            select count(*) from (
+                select coalesce(e.expected_result, m.adjudication_result) as r,
+                       coalesce(e.n, 0) as en, coalesce(m.n, 0) as mn
+                from expected_counts e
+                full outer join model_counts m
+                    on e.expected_result = m.adjudication_result
+            ) x where x.en <> x.mn
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"result-level count mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_adjudication_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
