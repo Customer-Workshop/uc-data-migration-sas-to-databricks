@@ -43,6 +43,46 @@ from dataclasses import dataclass, field
 from databricks import sql
 
 
+# SAS source-of-truth Basel III risk-weight CASE from
+# monthly_regulatory_reporting.sas (Step 1), reproduced value-for-value.
+# LTV is derived from collateral (migrated raw schema has no LTV column).
+# `a` is the account alias, `c` the collateral alias.
+RISK_WEIGHT_CASE = """
+        case
+            when a.account_type in ('CHK','SAV','MMA') then 0.00
+            when a.account_type = 'CD' then 0.00
+            when a.account_type = 'MTG'
+                and (case when c.collateral_value > 0 then a.current_balance / c.collateral_value end) <= 0.80
+                then 0.35
+            when a.account_type = 'MTG'
+                and (case when c.collateral_value > 0 then a.current_balance / c.collateral_value end) > 0.80
+                then 0.50
+            when a.account_type = 'HELC' then 0.50
+            when a.account_type in ('AUTO','PERS') then 0.75
+            when a.account_type = 'CC' then 0.75
+            when a.account_type = 'LOC' then 1.00
+            else 1.00
+        end
+"""
+
+# SAS delinquency aging-bucket CASE from Step 2 (days-past-due measure is
+# payment_history.max_days_past_due_ever in the migrated raw schema).
+DELINQ_BUCKET_CASE = """
+        case
+            when p.max_days_past_due_ever = 0 then 'Current'
+            when p.max_days_past_due_ever between 1 and 29 then '1-29'
+            when p.max_days_past_due_ever between 30 and 59 then '30-59'
+            when p.max_days_past_due_ever between 60 and 89 then '60-89'
+            when p.max_days_past_due_ever between 90 and 119 then '90-119'
+            when p.max_days_past_due_ever between 120 and 179 then '120-179'
+            when p.max_days_past_due_ever >= 180 then '180+'
+            else 'Unknown'
+        end
+"""
+
+LENDING_TYPES = "('MTG','AUTO','PERS','CC','LOC','HELC')"
+
+
 @dataclass
 class CheckResult:
     name: str
@@ -77,6 +117,14 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _rows(self, query: str):
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -100,9 +148,176 @@ class Reconciler:
             )
         )
 
+    def check_rwa_completeness(self):
+        """Sum of RWA group N_ACCOUNTS must equal the in-scope account population."""
+        expected = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope accounts = {expected}, RWA model accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_control_total(self):
+        """Total exposure and total RWA must tie out to the re-derived source totals."""
+        exp = self._rows(
+            f"""
+            select round(sum(a.current_balance), 2),
+                   round(sum(a.current_balance * ({RISK_WEIGHT_CASE})), 2)
+            from {self.intermediate}.int_account_metrics a
+            left join {self.raw}.collateral c on a.account_id = c.account_id
+            """
+        )[0]
+        act = self._rows(
+            f"""
+            select round(sum(total_exposure), 2), round(sum(rwa), 2)
+            from {self.marts}.mart_regulatory_rwa
+            """
+        )[0]
+        exp_exposure, exp_rwa = float(exp[0]), float(exp[1])
+        act_exposure, act_rwa = float(act[0]), float(act[1])
+        ok = exp_exposure == act_exposure and exp_rwa == act_rwa
+        self.results.append(
+            CheckResult(
+                "rwa_control_total",
+                "PASS" if ok else "FAIL",
+                (
+                    f"exposure src={exp_exposure:,.2f} mart={act_exposure:,.2f}; "
+                    f"RWA src={exp_rwa:,.2f} mart={act_rwa:,.2f}"
+                ),
+                {"expected_rwa": exp_rwa, "actual_rwa": act_rwa},
+            )
+        )
+
+    def check_rwa_parity(self):
+        """Every account_type -> risk_weight must match the SAS mapping value-for-value."""
+        mismatches = self._rows(
+            f"""
+            with expected as (
+                select a.account_type,
+                       cast(({RISK_WEIGHT_CASE}) as decimal(5,2)) as risk_weight,
+                       count(*) as n
+                from {self.intermediate}.int_account_metrics a
+                left join {self.raw}.collateral c on a.account_id = c.account_id
+                group by a.account_type, 2
+            ),
+            actual as (
+                select account_type, cast(risk_weight as decimal(5,2)) as risk_weight,
+                       sum(n_accounts) as n
+                from {self.marts}.mart_regulatory_rwa
+                group by account_type, cast(risk_weight as decimal(5,2))
+            )
+            select coalesce(e.account_type, a.account_type) as account_type,
+                   e.risk_weight as expected_weight, a.risk_weight as actual_weight,
+                   coalesce(e.n, 0) as expected_n, coalesce(a.n, 0) as actual_n
+            from expected e
+            full outer join actual a
+                on e.account_type = a.account_type and e.risk_weight = a.risk_weight
+            where coalesce(e.n, 0) <> coalesce(a.n, 0)
+            order by account_type
+            """
+        )
+        loc_weight = self._scalar(
+            f"""
+            select cast(max(risk_weight) as decimal(5,2))
+            from {self.marts}.mart_regulatory_rwa where account_type = 'LOC'
+            """
+        )
+        ok = len(mismatches) == 0
+        if ok:
+            detail = f"all account_type -> risk_weight match SAS source (LOC -> {loc_weight}, expected 1.00)"
+        else:
+            shown = "; ".join(
+                f"{r[0]} expected {r[1]} else not {r[2]}" for r in mismatches[:6]
+            )
+            detail = f"{len(mismatches)} mapping mismatch(es): {shown}"
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": len(mismatches), "loc_weight": str(loc_weight)},
+            )
+        )
+
+    def check_delinquency_completeness(self):
+        """Sum of aging-bucket N_ACCOUNTS must equal the in-scope lending population."""
+        expected = self._scalar(
+            f"""
+            select count(*) from {self.intermediate}.int_account_metrics
+            where account_type in {LENDING_TYPES}
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope lending accounts = {expected}, aging model accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_delinquency_parity(self):
+        """Every (account_type, region, bucket) count must match the SAS bucket logic."""
+        mismatches = self._rows(
+            f"""
+            with expected as (
+                select a.account_type, a.region_code,
+                       ({DELINQ_BUCKET_CASE}) as delinq_bucket, count(*) as n
+                from {self.intermediate}.int_account_metrics a
+                left join {self.raw}.payment_history p on a.account_id = p.account_id
+                where a.account_type in {LENDING_TYPES}
+                group by a.account_type, a.region_code, 3
+            ),
+            actual as (
+                select account_type, region_code, delinq_bucket, sum(n_accounts) as n
+                from {self.marts}.mart_delinquency_aging
+                group by account_type, region_code, delinq_bucket
+            )
+            select coalesce(e.account_type, a.account_type) as account_type,
+                   coalesce(e.delinq_bucket, a.delinq_bucket) as delinq_bucket,
+                   coalesce(e.n, 0) as expected_n, coalesce(a.n, 0) as actual_n
+            from expected e
+            full outer join actual a
+                on e.account_type = a.account_type
+                and e.region_code = a.region_code
+                and e.delinq_bucket = a.delinq_bucket
+            where coalesce(e.n, 0) <> coalesce(a.n, 0)
+            """
+        )
+        ok = len(mismatches) == 0
+        detail = (
+            "all aging-bucket assignments match SAS source"
+            if ok
+            else f"{len(mismatches)} bucket mismatch(es) vs SAS source"
+        )
+        self.results.append(
+            CheckResult(
+                "delinquency_bucket_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": len(mismatches)},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_completeness()
+        self.check_rwa_control_total()
+        self.check_rwa_parity()
+        self.check_delinquency_completeness()
+        self.check_delinquency_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
