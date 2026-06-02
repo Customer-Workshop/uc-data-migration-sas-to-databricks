@@ -61,8 +61,11 @@ validated as (
         p.deductible,
         case
             -- SAS: if rc ne 0 then 'Policy not found or inactive'
+            -- coalesce so a NULL c.policy_id still yields a non-null error and is
+            -- routed to invalid (|| with a NULL operand returns NULL in Spark SQL,
+            -- which would otherwise let a keyless claim slip past the WHERE filter)
             when p.policy_id is null
-                then 'Policy not found or inactive: ' || c.policy_id
+                then 'Policy not found or inactive: ' || coalesce(c.policy_id, '(missing)')
             -- SAS: if LOSS_DATE < EFFECTIVE_DATE or LOSS_DATE > EXPIRATION_DATE
             when c.loss_date < p.effective_date or c.loss_date > p.expiry_date
                 then 'Loss date outside policy period'
