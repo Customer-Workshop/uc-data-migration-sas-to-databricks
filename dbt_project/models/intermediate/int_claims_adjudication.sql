@@ -30,7 +30,8 @@ fraud_screened as (
     select
         c.*,
         f.fraud_score,
-        f.indicator_flags,
+        -- SAS: INDICATOR_FLAGS → Databricks column is model_version
+        f.model_version,
         -- SAS: case when f.FRAUD_SCORE >= 80 then 'HIGH'
         --           when f.FRAUD_SCORE >= 50 then 'MEDIUM'
         --           else 'LOW' end as FRAUD_RISK
@@ -40,9 +41,9 @@ fraud_screened as (
             else 'LOW'
         end as fraud_risk
     from claims c
+    -- SAS: join on POLICY_ID + CLAIMANT_ID → Databricks fraud_indicators keyed by claim_id
     left join fraud f
-        on c.policy_id = f.policy_id
-        and c.claimant_id = f.claimant_id
+        on c.claim_id = f.claim_id
 ),
 
 -- SAS: Step 3 — DATA step auto-adjudication IF/THEN/ELSE routing
