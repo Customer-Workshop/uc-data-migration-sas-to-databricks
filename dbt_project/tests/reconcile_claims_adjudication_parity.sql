@@ -31,13 +31,13 @@ with fraud_risk_scored as (
 raw_adjudicated as (
     select
         case
-            when fi.fraud_risk = 'HIGH'
+            when coalesce(fi.fraud_risk, 'LOW') = 'HIGH'
                 then 'DENY'
-            when fi.fraud_risk = 'LOW'
+            when coalesce(fi.fraud_risk, 'LOW') = 'LOW'
                  and c.claimed_amount <= 5000
                  and p.policy_type in ('AUTO', 'HOME', 'RENT')
                 then 'APPR'
-            when fi.fraud_risk = 'LOW'
+            when coalesce(fi.fraud_risk, 'LOW') = 'LOW'
                  and c.claimed_amount <= p.sum_insured * 0.25
                  and c.claimed_amount <= 50000
                 then 'APPR'

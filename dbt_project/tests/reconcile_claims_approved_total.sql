@@ -32,12 +32,12 @@ raw_approved as (
         sum(
             case
                 -- Rule 1: LOW + <= 5000 + AUTO/HOME/RENT → APPR
-                when fi.fraud_risk = 'LOW'
+                when coalesce(fi.fraud_risk, 'LOW') = 'LOW'
                      and c.claimed_amount <= 5000
                      and p.policy_type in ('AUTO', 'HOME', 'RENT')
                     then greatest(0, c.claimed_amount - p.deductible)
                 -- Rule 2: LOW + <= 25% sum_insured + <= 50000 (not caught by rule 1)
-                when fi.fraud_risk = 'LOW'
+                when coalesce(fi.fraud_risk, 'LOW') = 'LOW'
                      and not (
                          c.claimed_amount <= 5000
                          and p.policy_type in ('AUTO', 'HOME', 'RENT')
