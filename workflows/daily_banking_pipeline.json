@@ -22,6 +22,48 @@
       "retry_on_timeout": true
     },
     {
+      "task_key": "dbt_stg_claims",
+      "description": "Run the stg_claims staging model. Ingests raw claims data and applies initial schema validation. Replaces claims_processing.sas Step 1 (hash object policy lookup and claim intake).",
+      "depends_on": [
+        {
+          "task_key": "dbt_staging"
+        }
+      ],
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt run --select stg_claims --target {{job.parameters.dbt_target}}"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "{{job.parameters.dbt_target}}"
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "dbt_int_claims_adjudication",
+      "description": "Run the int_claims_adjudication intermediate model. Applies fraud screening, auto-adjudication logic, and computes adjudication metrics. Replaces claims_processing.sas Steps 2-4 (fraud flag derivation, adjudication rules, SIU referral scoring).",
+      "depends_on": [
+        {
+          "task_key": "dbt_stg_claims"
+        }
+      ],
+      "dbt_task": {
+        "project_directory": "/Workspace/Repos/production/uc-data-migration-sas-to-databricks/dbt_project",
+        "commands": [
+          "dbt run --select int_claims_adjudication --target {{job.parameters.dbt_target}}"
+        ],
+        "warehouse_id": "${var.databricks_warehouse_id}",
+        "catalog": "banking_analytics",
+        "schema": "{{job.parameters.dbt_target}}"
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1,
+      "retry_on_timeout": true
+    },
+    {
       "task_key": "dbt_intermediate",
       "description": "Compute derived metrics and business logic. Replaces SAS Step 2 (DATA step computing ACCT_AGE_MONTHS, UTILIZATION_PCT, DORMANCY_FLAG), claims_processing.sas (Steps 2-4: fraud screening and adjudication), and policy_valuation.sas (Steps 1-4: premium, claims experience, reserves).",
       "depends_on": [
@@ -48,6 +90,9 @@
       "depends_on": [
         {
           "task_key": "dbt_intermediate"
+        },
+        {
+          "task_key": "dbt_int_claims_adjudication"
         }
       ],
       "dbt_task": {
