@@ -110,8 +110,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         .withColumn(
             "fraud_risk",
-            F.when(F.col("fraud_score") >= 80, "HIGH")
-            .when(F.col("fraud_score") >= 50, "MEDIUM")
+            F.when(F.col("fraud_score") >= 0.80, "HIGH")
+            .when(F.col("fraud_score") >= 0.50, "MEDIUM")
             .otherwise("LOW"),
         )
     )
