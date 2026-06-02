@@ -36,7 +36,7 @@
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
-        "schema": "{{job.parameters.dbt_target}}"
+        "schema": "prod"
       },
       "timeout_seconds": 3600,
       "max_retries": 1,
@@ -57,7 +57,7 @@
         ],
         "warehouse_id": "${var.databricks_warehouse_id}",
         "catalog": "banking_analytics",
-        "schema": "{{job.parameters.dbt_target}}"
+        "schema": "prod"
       },
       "timeout_seconds": 3600,
       "max_retries": 1,
