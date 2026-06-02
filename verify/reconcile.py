@@ -77,6 +77,23 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _scalar_safe(self, query: str):
+        """Like _scalar but returns None on database errors (e.g. missing table)."""
+        try:
+            return self._scalar(query)
+        except Exception:
+            return None
+
+    def _query(self, query: str):
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        except Exception:
+            return None
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -100,9 +117,191 @@ class Reconciler:
             )
         )
 
+    # ---- policy valuation checks (policy_valuation.sas conversion) ----
+
+    def check_policy_valuation_completeness(self):
+        """In-force policy count must match raw ACTIVE policies in the period."""
+        # Use the model's own valuation_date (set at dbt build time) so the
+        # control stays consistent even if reconcile.py runs on a later day.
+        val_date = self._scalar_safe(
+            f"select max(valuation_date) from {self.intermediate}.int_policy_valuation"
+        )
+        if val_date is None:
+            self.results.append(
+                CheckResult("policy_valuation_completeness", "SKIP",
+                            "int_policy_valuation not found")
+            )
+            return
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.policies
+            where policy_status = 'ACTIVE'
+              and effective_date <= '{val_date}'
+              and expiry_date   >= '{val_date}'
+            """
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_policy_valuation"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "policy_valuation_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-force raw policies = {expected}, model policies = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_policy_valuation_control_total(self):
+        """Total earned premium ties between the int and mart layers."""
+        int_total = self._scalar_safe(
+            f"""
+            select coalesce(sum(ytd_earned_premium), 0)
+            from {self.intermediate}.int_policy_valuation
+            """
+        )
+        mart_total = self._scalar_safe(
+            f"""
+            select coalesce(sum(total_earned), 0)
+            from {self.marts}.mart_loss_ratios
+            """
+        )
+        if int_total is None or mart_total is None:
+            self.results.append(
+                CheckResult("policy_valuation_control_total", "SKIP",
+                            "int_policy_valuation or mart_loss_ratios not found")
+            )
+            return
+        diff = abs(float(int_total) - float(mart_total))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "policy_valuation_control_total",
+                "PASS" if ok else "FAIL",
+                f"int earned = {int_total}, mart earned = {mart_total}, diff = {diff:.2f}",
+                {"int_total": int_total, "mart_total": mart_total, "diff": diff},
+            )
+        )
+
+    def check_policy_valuation_parity(self):
+        """Per-policy SAS formulas (loss/combined ratio, adequacy, IBNR) hold."""
+        rows = self._query(
+            f"""
+            select policy_id, ytd_earned_premium, total_incurred, total_paid,
+                   loss_ratio, combined_ratio, premium_adequate, ibnr_estimate
+            from {self.intermediate}.int_policy_valuation
+            """
+        )
+        if rows is None:
+            self.results.append(
+                CheckResult("policy_valuation_parity", "SKIP",
+                            "int_policy_valuation not found")
+            )
+            return
+        failures = []
+        for row in rows:
+            pid, earned, incurred, paid, lr, cr, adequate, ibnr = row
+            earned = float(earned or 0)
+            incurred = float(incurred or 0)
+            paid = float(paid or 0)
+            if earned > 0:
+                exp_lr = incurred / earned
+                exp_cr = exp_lr + 0.30
+                exp_adequate = "Y" if exp_cr <= 1.0 else "N"
+            else:
+                exp_lr = None
+                exp_cr = None
+                exp_adequate = "N"
+            exp_ibnr = max(0.0, earned * 0.15 - paid)
+            lr_ok = (lr is None and exp_lr is None) or (
+                lr is not None and exp_lr is not None
+                and abs(float(lr) - exp_lr) <= 0.0001
+            )
+            cr_ok = (cr is None and exp_cr is None) or (
+                cr is not None and exp_cr is not None
+                and abs(float(cr) - exp_cr) <= 0.0001
+            )
+            if not (lr_ok and cr_ok and adequate == exp_adequate
+                    and abs(float(ibnr) - exp_ibnr) <= 0.0001):
+                failures.append(str(pid))
+        ok = len(failures) == 0
+        detail = (
+            f"all {len(rows)} policies match SAS formulas"
+            if ok else
+            f"{len(failures)} policies diverge (e.g. {', '.join(failures[:5])})"
+        )
+        self.results.append(
+            CheckResult("policy_valuation_parity", "PASS" if ok else "FAIL", detail)
+        )
+
+    def check_loss_ratios_completeness(self):
+        """mart_loss_ratios has one row per distinct in-force policy type."""
+        expected = self._scalar_safe(
+            f"""
+            select count(distinct policy_type)
+            from {self.intermediate}.int_policy_valuation
+            """
+        )
+        actual = self._scalar_safe(
+            f"select count(*) from {self.marts}.mart_loss_ratios"
+        )
+        if expected is None or actual is None:
+            self.results.append(
+                CheckResult("loss_ratios_completeness", "SKIP",
+                            "int_policy_valuation or mart_loss_ratios not found")
+            )
+            return
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "loss_ratios_completeness",
+                "PASS" if ok else "FAIL",
+                f"distinct policy types = {expected}, mart rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_loss_ratios_parity(self):
+        """Aggregate loss / combined ratio formulas match SAS exactly."""
+        rows = self._query(
+            f"""
+            select policy_type, agg_loss_ratio, agg_combined_ratio,
+                   total_incurred, total_earned
+            from {self.marts}.mart_loss_ratios
+            where total_earned > 0
+            """
+        )
+        if rows is None:
+            self.results.append(
+                CheckResult("loss_ratios_parity", "SKIP",
+                            "mart_loss_ratios not found")
+            )
+            return
+        failures = []
+        for row in rows:
+            ptype, lr, cr, incurred, earned = row
+            exp_lr = float(incurred) / float(earned)
+            exp_cr = exp_lr + 0.30
+            if abs(float(lr) - exp_lr) > 0.0001 or abs(float(cr) - exp_cr) > 0.0001:
+                failures.append(
+                    f"{ptype}: lr={lr} (exp {exp_lr:.6f}), cr={cr} (exp {exp_cr:.6f})"
+                )
+        ok = len(failures) == 0
+        detail = "all policy types match" if ok else "; ".join(failures)
+        self.results.append(
+            CheckResult("loss_ratios_parity", "PASS" if ok else "FAIL", detail)
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_policy_valuation_completeness()
+        self.check_policy_valuation_control_total()
+        self.check_policy_valuation_parity()
+        self.check_loss_ratios_completeness()
+        self.check_loss_ratios_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
