@@ -78,10 +78,10 @@ def main(argv: list[str] | None = None) -> int:
 
     policies = (
         spark.table(f"{catalog}.raw.policies")
-        .filter(F.col("status") == "ACTIVE")
+        .filter(F.col("policy_status") == "ACTIVE")
         .select(
             "policy_id", "policy_type", "effective_date",
-            "expiration_date", "sum_insured", "deductible",
+            "expiry_date", "sum_insured", "deductible",
         )
     )
 
@@ -90,20 +90,22 @@ def main(argv: list[str] | None = None) -> int:
         .join(F.broadcast(policies), on="policy_id", how="inner")
         .filter(
             (F.col("loss_date") >= F.col("effective_date"))
-            & (F.col("loss_date") <= F.col("expiration_date"))
+            & (F.col("loss_date") <= F.col("expiry_date"))
             & (F.col("claimed_amount") <= F.col("sum_insured"))
         )
     )
 
     # ── Step 2: Fraud screening ──────────────────────────────────────────
     # SAS: left join TERA_DW.FRAUD_INDICATORS on POLICY_ID and CLAIMANT_ID
+    # The fraud_indicators table is keyed by claim_id (not policy_id/claimant_id),
+    # so we join through the claims table's claim_id.
     fraud_indicators = spark.table(f"{catalog}.raw.fraud_indicators")
 
     claims_screened = (
         claims_validated
         .join(
-            fraud_indicators.select("policy_id", "claimant_id", "fraud_score", "indicator_flags"),
-            on=["policy_id", "claimant_id"],
+            fraud_indicators.select("claim_id", "fraud_score"),
+            on="claim_id",
             how="left",
         )
         .withColumn(
@@ -159,11 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         .withColumn("alert_date", F.current_date())
         .withColumn(
             "alert_reason",
-            F.concat_ws(
-                "; ",
-                F.concat(F.lit("Fraud score: "), F.col("fraud_score").cast("string")),
-                F.coalesce(F.col("indicator_flags"), F.lit("")),
-            ),
+            F.concat(F.lit("Fraud score: "), F.col("fraud_score").cast("string")),
         )
         .write.mode("overwrite")
         .saveAsTable(f"{curated}.fraud_alerts")
