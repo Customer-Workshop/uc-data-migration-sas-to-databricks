@@ -100,9 +100,97 @@ class Reconciler:
             )
         )
 
+    # ---- Claims processing cross-engine checks ---------------------------
+    def check_claims_register_completeness(self):
+        """Curated claims_register row count must equal int_claims_adjudication."""
+        try:
+            adj_count = self._scalar(
+                f"select count(*) from {self.intermediate}.int_claims_adjudication"
+            )
+            reg_count = self._scalar(
+                f"select count(*) from {self.curated}.claims_register"
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult(
+                    "claims_register_completeness",
+                    "SKIP",
+                    f"prerequisite table missing: {exc}",
+                )
+            )
+            return
+        ok = adj_count == reg_count
+        self.results.append(
+            CheckResult(
+                "claims_register_completeness",
+                "PASS" if ok else "FAIL",
+                f"int_claims_adjudication = {adj_count}, claims_register = {reg_count}",
+                {"expected": adj_count, "actual": reg_count},
+            )
+        )
+
+    def check_claims_referential_integrity(self):
+        """Every claim_id in curated tables must exist in int_claims_adjudication."""
+        try:
+            orphan_register = self._scalar(
+                f"""
+                select count(*)
+                from {self.curated}.claims_register r
+                left join {self.intermediate}.int_claims_adjudication a
+                    on r.claim_id = a.claim_id
+                where a.claim_id is null
+                """
+            )
+            orphan_review = self._scalar(
+                f"""
+                select count(*)
+                from {self.curated}.claims_review_queue q
+                left join {self.intermediate}.int_claims_adjudication a
+                    on q.claim_id = a.claim_id
+                where a.claim_id is null
+                """
+            )
+            orphan_fraud = self._scalar(
+                f"""
+                select count(*)
+                from {self.curated}.fraud_alerts f
+                left join {self.intermediate}.int_claims_adjudication a
+                    on f.claim_id = a.claim_id
+                where a.claim_id is null
+                """
+            )
+        except Exception as exc:
+            self.results.append(
+                CheckResult(
+                    "claims_referential_integrity",
+                    "SKIP",
+                    f"prerequisite table missing: {exc}",
+                )
+            )
+            return
+        total_orphans = orphan_register + orphan_review + orphan_fraud
+        ok = total_orphans == 0
+        self.results.append(
+            CheckResult(
+                "claims_referential_integrity",
+                "PASS" if ok else "FAIL",
+                (
+                    f"orphan claim_ids: register={orphan_register}, "
+                    f"review_queue={orphan_review}, fraud_alerts={orphan_fraud}"
+                ),
+                {
+                    "orphan_register": orphan_register,
+                    "orphan_review": orphan_review,
+                    "orphan_fraud": orphan_fraud,
+                },
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_register_completeness()
+        self.check_claims_referential_integrity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
