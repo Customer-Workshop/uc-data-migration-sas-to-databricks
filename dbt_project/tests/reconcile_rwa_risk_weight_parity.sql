@@ -32,6 +32,8 @@ expected as (
     union all select 'SAV',  0.00
     union all select 'MMA',  0.00
     union all select 'CD',   0.00
+    union all select 'MTG',  0.35
+    union all select 'MTG',  0.50
     union all select 'HELC', 0.50
     union all select 'AUTO', 0.75
     union all select 'PERS', 0.75

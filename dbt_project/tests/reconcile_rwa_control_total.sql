@@ -25,7 +25,12 @@ recomputed as (
                              then a.current_balance / c.collateral_value
                              else null
                          end <= 0.80                          then 0.35
-                when a.account_type = 'MTG'                   then 0.50
+                when a.account_type = 'MTG'
+                     and case
+                             when c.collateral_value > 0
+                             then a.current_balance / c.collateral_value
+                             else null
+                         end > 0.80                           then 0.50
                 when a.account_type = 'HELC'                  then 0.50
                 when a.account_type in ('AUTO', 'PERS')       then 0.75
                 when a.account_type = 'CC'                    then 0.75
