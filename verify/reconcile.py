@@ -100,9 +100,106 @@ class Reconciler:
             )
         )
 
+    # --------------------------------------------------------- PNL checks
+    def check_pnl_completeness(self):
+        """mart_customer_pnl row count matches distinct customers in staging."""
+        expected = self._scalar(
+            f"select count(distinct customer_id) from {self.staging}.stg_cust_accounts"
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_customer_pnl")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "pnl_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected customers = {expected}, mart rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_pnl_profit_tier_parity(self):
+        """Every profit_tier matches the SAS threshold rules value-for-value."""
+        mismatches = self._scalar(
+            f"""
+            select count(*) from {self.marts}.mart_customer_pnl
+            where profit_tier != case
+                when net_profit >= 500 then 'Highly Profitable'
+                when net_profit >= 100 then 'Profitable'
+                when net_profit >= 0 then 'Marginal'
+                else 'Unprofitable'
+            end
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "pnl_profit_tier_parity",
+                "PASS" if ok else "FAIL",
+                f"tier mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
+    def check_pnl_control_total(self):
+        """Total net_profit ties to independently computed sum."""
+        row = None
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"""
+                select
+                    round(sum(net_profit), 2) as mart_total,
+                    round(sum(total_revenue - operating_cost
+                              - coalesce(total_ecl, 0)), 2) as computed_total
+                from {self.marts}.mart_customer_pnl
+                """
+            )
+            row = cur.fetchone()
+        finally:
+            cur.close()
+        if row is None:
+            self.results.append(
+                CheckResult("pnl_control_total", "SKIP", "no data")
+            )
+            return
+        mart_total, computed_total = row
+        ok = abs((mart_total or 0) - (computed_total or 0)) <= 0.01
+        self.results.append(
+            CheckResult(
+                "pnl_control_total",
+                "PASS" if ok else "FAIL",
+                f"mart sum = {mart_total}, computed sum = {computed_total}",
+                {"mart_total": mart_total, "computed_total": computed_total},
+            )
+        )
+
+    def check_pnl_revenue_formula(self):
+        """total_revenue = coalesce(net_interest_income,0) + coalesce(fee_income,0) for every row."""
+        mismatches = self._scalar(
+            f"""
+            select count(*) from {self.marts}.mart_customer_pnl
+            where abs(total_revenue
+                      - (coalesce(net_interest_income, 0)
+                         + coalesce(fee_income, 0))) > 0.01
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "pnl_revenue_formula",
+                "PASS" if ok else "FAIL",
+                f"revenue formula mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_pnl_completeness()
+        self.check_pnl_profit_tier_parity()
+        self.check_pnl_control_total()
+        self.check_pnl_revenue_formula()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
