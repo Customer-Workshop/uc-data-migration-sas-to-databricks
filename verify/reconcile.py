@@ -100,9 +100,131 @@ class Reconciler:
             )
         )
 
+    # ------------------------------------------------------------------ checks
+    # monthly_regulatory_reporting.sas — Step 1: RWA
+    def check_rwa_completeness(self):
+        """mart_regulatory_rwa row count must match int_account_metrics."""
+        expected = self._scalar(
+            f"select count(*) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(
+            f"select sum(n_accounts) from {self.marts}.mart_regulatory_rwa"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"expected accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_risk_weight_parity(self):
+        """Every account_type risk_weight must match the SAS CASE mapping."""
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"""
+                select distinct account_type, risk_weight
+                from {self.marts}.mart_regulatory_rwa
+                """
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+
+        expected_map = {
+            "CHK": {0.00}, "SAV": {0.00}, "MMA": {0.00}, "CD": {0.00},
+            "MTG": {0.35, 0.50}, "HELC": {0.50},
+            "AUTO": {0.75}, "PERS": {0.75}, "CC": {0.75}, "LOC": {1.00},
+        }
+        divergences = []
+        for acct_type, weight in rows:
+            allowed = expected_map.get(acct_type, {1.00})
+            if round(float(weight), 3) not in {round(w, 3) for w in allowed}:
+                divergences.append(f"{acct_type}={weight} (expected {allowed})")
+
+        ok = len(divergences) == 0
+        detail = "all weights match SAS source" if ok else "; ".join(divergences)
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"divergences": divergences},
+            )
+        )
+
+    def check_rwa_control_total(self):
+        """Total RWA in mart must tie to independently computed total."""
+        mart_rwa = self._scalar(
+            f"select coalesce(sum(rwa), 0) from {self.marts}.mart_regulatory_rwa"
+        )
+        independent_rwa = self._scalar(
+            f"""
+            select coalesce(sum(
+                a.current_balance * case
+                    when a.account_type in ('CHK','SAV','MMA') then 0.00
+                    when a.account_type = 'CD' then 0.00
+                    when a.account_type = 'MTG'
+                         and c.collateral_value > 0
+                         and (a.current_balance / c.collateral_value) <= 0.80
+                        then 0.35
+                    when a.account_type = 'MTG' then 0.50
+                    when a.account_type = 'HELC' then 0.50
+                    when a.account_type in ('AUTO','PERS') then 0.75
+                    when a.account_type = 'CC' then 0.75
+                    when a.account_type = 'LOC' then 1.00
+                    else 1.00
+                end
+            ), 0)
+            from {self.intermediate}.int_account_metrics a
+            left join {self.raw}.collateral c
+                on a.account_id = c.account_id
+            """
+        )
+        diff = abs(float(mart_rwa) - float(independent_rwa))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_control_total",
+                "PASS" if ok else "FAIL",
+                f"mart RWA = {mart_rwa}, independent = {independent_rwa}, diff = {diff:.2f}",
+                {"mart_rwa": mart_rwa, "independent_rwa": independent_rwa, "diff": diff},
+            )
+        )
+
+    # monthly_regulatory_reporting.sas — Step 2: Delinquency Aging
+    def check_delinquency_completeness(self):
+        """mart_delinquency_aging must cover all in-scope loan accounts."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select sum(n_accounts) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope loan accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_completeness()
+        self.check_rwa_risk_weight_parity()
+        self.check_rwa_control_total()
+        self.check_delinquency_completeness()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
