@@ -31,7 +31,7 @@ model_buckets as (
 source_buckets as (
     select distinct
         case
-            when p.max_days_past_due_ever = 0              then 'Current'
+            when coalesce(p.max_days_past_due_ever, 0) = 0   then 'Current'
             when p.max_days_past_due_ever between 1 and 29     then '1-29'
             when p.max_days_past_due_ever between 30 and 59    then '30-59'
             when p.max_days_past_due_ever between 60 and 89    then '60-89'
