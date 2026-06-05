@@ -172,13 +172,14 @@ class Reconciler:
         seen_types = set()
         for acct_type, weight in rows:
             seen_types.add(acct_type)
-            # MTG has two valid weights (0.35, 0.50) depending on LTV — skip simple check
+            w = float(weight)
+            # MTG has two valid weights (0.35, 0.50) depending on LTV
             if acct_type == "MTG":
-                if weight not in (0.35, 0.50):
-                    mismatches.append(f"MTG actual {weight}, expected 0.35 or 0.50")
+                if not (abs(w - 0.35) < 0.001 or abs(w - 0.50) < 0.001):
+                    mismatches.append(f"MTG actual {w}, expected 0.35 or 0.50")
                 continue
             exp = expected_map.get(acct_type, 1.00)
-            if abs(float(weight) - exp) > 0.001:
+            if abs(w - exp) > 0.001:
                 mismatches.append(f"{acct_type} actual {weight}, expected {exp}")
 
         ok = len(mismatches) == 0
