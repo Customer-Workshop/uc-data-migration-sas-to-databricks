@@ -100,9 +100,154 @@ class Reconciler:
             )
         )
 
+    # ---- mart_regulatory_rwa controls (monthly_regulatory_reporting.sas Step 1)
+
+    def check_rwa_completeness(self):
+        """sum(n_accounts) in mart_regulatory_rwa must equal int_account_metrics rows."""
+        expected = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        actual = self._scalar(f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_regulatory_rwa")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_control_total(self):
+        """sum(rwa) in the mart ties out to an independent recomputation."""
+        mart_rwa = self._scalar(f"select coalesce(sum(rwa), 0) from {self.marts}.mart_regulatory_rwa")
+        recomputed_rwa = self._scalar(
+            f"""
+            select coalesce(sum(
+                a.current_balance * case
+                    when a.account_type in ('CHK','SAV','MMA') then 0.00
+                    when a.account_type = 'CD'                then 0.00
+                    when a.account_type = 'MTG'
+                         and case when c.collateral_value > 0
+                                  then a.current_balance / c.collateral_value
+                                  else null end <= 0.80       then 0.35
+                    when a.account_type = 'MTG'               then 0.50
+                    when a.account_type = 'HELC'              then 0.50
+                    when a.account_type in ('AUTO','PERS')    then 0.75
+                    when a.account_type = 'CC'                then 0.75
+                    when a.account_type = 'LOC'               then 1.00
+                    else 1.00
+                end
+            ), 0)
+            from {self.intermediate}.int_account_metrics a
+            left join {self.raw}.collateral c on a.account_id = c.account_id
+            """
+        )
+        diff = abs(float(mart_rwa or 0) - float(recomputed_rwa or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_control_total",
+                "PASS" if ok else "FAIL",
+                f"mart sum(rwa) = {mart_rwa}, recomputed = {recomputed_rwa}, diff = {diff:.2f}",
+                {"mart": mart_rwa, "recomputed": recomputed_rwa, "diff": diff},
+            )
+        )
+
+    def check_rwa_risk_weight_parity(self):
+        """Every account type's risk weight matches the SAS source mapping."""
+        expected_map = {
+            "CHK": 0.00, "SAV": 0.00, "MMA": 0.00, "CD": 0.00,
+            "HELC": 0.50, "AUTO": 0.75, "PERS": 0.75, "CC": 0.75,
+            "LOC": 1.00, "IRA": 1.00,
+        }
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"select distinct account_type, risk_weight from {self.marts}.mart_regulatory_rwa"
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+
+        mismatches = []
+        seen_types = set()
+        for acct_type, weight in rows:
+            seen_types.add(acct_type)
+            # MTG has two valid weights (0.35, 0.50) depending on LTV — skip simple check
+            if acct_type == "MTG":
+                if weight not in (0.35, 0.50):
+                    mismatches.append(f"MTG actual {weight}, expected 0.35 or 0.50")
+                continue
+            exp = expected_map.get(acct_type, 1.00)
+            if abs(float(weight) - exp) > 0.001:
+                mismatches.append(f"{acct_type} actual {weight}, expected {exp}")
+
+        ok = len(mismatches) == 0
+        detail = "all weights match" if ok else "; ".join(mismatches)
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": mismatches, "types_seen": sorted(seen_types)},
+            )
+        )
+
+    # ---- mart_delinquency_aging controls (monthly_regulatory_reporting.sas Step 2)
+
+    def check_delinquency_completeness(self):
+        """sum(n_accounts) in mart_delinquency_aging must equal in-scope lending accounts."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select coalesce(sum(n_accounts), 0) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope lending accounts = {expected}, mart sum(n_accounts) = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_delinquency_bucket_parity(self):
+        """Every bucket in the mart must be a SAS-defined bucket."""
+        valid = {"Current", "1-29", "30-59", "60-89", "90-119", "120-179", "180+", "Unknown"}
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"select distinct delinq_bucket from {self.marts}.mart_delinquency_aging"
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+        model_buckets = {r[0] for r in rows}
+        unexpected = model_buckets - valid
+        ok = len(unexpected) == 0
+        self.results.append(
+            CheckResult(
+                "delinquency_bucket_parity",
+                "PASS" if ok else "FAIL",
+                f"model buckets = {sorted(model_buckets)}, unexpected = {sorted(unexpected)}" if unexpected
+                else f"all buckets valid: {sorted(model_buckets)}",
+                {"model_buckets": sorted(model_buckets), "unexpected": sorted(unexpected)},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_completeness()
+        self.check_rwa_control_total()
+        self.check_rwa_risk_weight_parity()
+        self.check_delinquency_completeness()
+        self.check_delinquency_bucket_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
