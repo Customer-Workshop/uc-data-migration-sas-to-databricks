@@ -12,6 +12,7 @@
     LEFT JOIN replaces PROC SQL fraud check.
     CASE expressions replace DATA step adjudication routing.
     SAS hash object → broadcast JOIN pattern.
+    fraud_score is 0.0–1.0 (normalized); thresholds at 0.80 / 0.50.
 */
 
 with claims as (
@@ -23,16 +24,14 @@ fraud_check as (
     select
         c.*,
         f.fraud_score,
-        f.indicator_flags,
         case
-            when f.fraud_score >= 80 then 'HIGH'
-            when f.fraud_score >= 50 then 'MEDIUM'
+            when f.fraud_score >= 0.80 then 'HIGH'
+            when f.fraud_score >= 0.50 then 'MEDIUM'
             else 'LOW'
         end as fraud_risk
     from claims c
     left join {{ source('insurance_raw', 'fraud_indicators') }} f
-        on c.policy_id = f.policy_id
-        and c.claimant_id = f.claimant_id
+        on c.claim_id = f.claim_id
 ),
 
 -- SAS Steps 3-4: Auto-adjudication routing logic

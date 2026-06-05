@@ -9,6 +9,7 @@
   dbt Equivalent:
     SQL CASE replaces SAS bucket logic.
     SAS "calculated" column → CTE so the bucket is referenceable.
+    payment_history.max_days_past_due_ever maps to SAS DAYS_PAST_DUE.
 */
 
 with lending_accounts as (
@@ -17,11 +18,10 @@ with lending_accounts as (
         a.account_type,
         a.region_code,
         a.current_balance,
-        l.days_past_due,
-        l.past_due_amount
+        coalesce(p.max_days_past_due_ever, 0) as days_past_due
     from {{ ref('int_account_metrics') }} a
-    left join {{ source('banking_raw', 'loan_details') }} l
-        on a.account_id = l.account_id
+    left join {{ source('banking_raw', 'payment_history') }} p
+        on a.account_id = p.account_id
     where a.account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
 ),
 
@@ -47,7 +47,6 @@ select
     region_code,
     delinq_bucket,
     count(*) as n_accounts,
-    sum(current_balance) as total_balance,
-    sum(past_due_amount) as total_past_due
+    sum(current_balance) as total_balance
 from bucketed
 group by 1, 2, 3, 4

@@ -24,11 +24,11 @@ active_policies as (
         policy_id,
         policy_type,
         effective_date,
-        expiration_date,
+        expiry_date,
         sum_insured,
         deductible
     from {{ source('insurance_raw', 'policies') }}
-    where status = 'ACTIVE'
+    where policy_status = 'ACTIVE'
 ),
 
 validated as (
@@ -41,19 +41,16 @@ validated as (
         c.loss_date,
         c.reported_date,
         c.claimed_amount,
-        c.incurred_amount,
-        c.paid_amount,
-        c.reserved_amount,
         p.policy_type,
         p.effective_date,
-        p.expiration_date,
+        p.expiry_date,
         p.sum_insured,
         p.deductible,
         case
             when p.policy_id is null
                 then 'Policy not found or inactive'
             when c.loss_date < p.effective_date
-                 or c.loss_date > p.expiration_date
+                 or c.loss_date > p.expiry_date
                 then 'Loss date outside policy period'
             when c.claimed_amount > p.sum_insured
                 then 'Claimed amount exceeds sum insured'
