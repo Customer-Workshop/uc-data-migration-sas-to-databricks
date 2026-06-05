@@ -114,12 +114,13 @@ def main(namespace: str, catalog: str = "banking_analytics") -> int:
         "claimed_amount",
         "loss_date",
         "fraud_score",
-        F.col("indicator_flags"),
+        F.col("model_version"),
         # SAS: ALERT_REASON = catx('; ', catx(' ', 'Fraud score:', put(FRAUD_SCORE, 4.)), INDICATOR_FLAGS)
+        # Schema mapping: SAS INDICATOR_FLAGS -> model_version
         F.concat_ws(
             "; ",
             F.concat(F.lit("Fraud score: "), F.col("fraud_score").cast("string")),
-            F.col("indicator_flags"),
+            F.col("model_version"),
         ).alias("alert_reason"),
         # SAS: ALERT_DATE = "&proc_date"d
         F.col("processing_date").alias("alert_date"),

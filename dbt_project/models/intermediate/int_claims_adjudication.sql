@@ -24,19 +24,21 @@ with stg as (
 
 fraud_screening as (
     -- SAS Step 2: PROC SQL left join to TERA_DW.FRAUD_INDICATORS
+    -- Schema mapping: SAS joins on POLICY_ID+CLAIMANT_ID → claim_id (actual FK).
+    -- Schema mapping: SAS FRAUD_SCORE is 0–100 → Databricks fraud_score is 0–1.
+    -- Schema mapping: SAS INDICATOR_FLAGS → model_version (closest equivalent).
     select
         s.*,
         f.fraud_score,
-        f.indicator_flags,
+        f.model_version,
         case
-            when f.fraud_score >= 80 then 'HIGH'
-            when f.fraud_score >= 50 then 'MEDIUM'
+            when f.fraud_score >= 0.80 then 'HIGH'
+            when f.fraud_score >= 0.50 then 'MEDIUM'
             else 'LOW'
         end as fraud_risk
     from stg s
     left join {{ source('insurance_raw', 'fraud_indicators') }} f
-        on s.policy_id = f.policy_id
-        and s.claimant_id = f.claimant_id
+        on s.claim_id = f.claim_id
 ),
 
 adjudicated as (
@@ -45,6 +47,10 @@ adjudicated as (
     select
         *,
 
+        -- SAS source quirk: RENT is an eligible policy_type for auto-approve
+        -- rule 2, but the seed data only contains (AUTO, HOME, LIFE, HEALTH,
+        -- COMMERCIAL). RENT will never match in practice but is preserved
+        -- here to be source-faithful.
         case
             -- Rule 1: HIGH fraud → DENY (SAS: output WORK.MANUAL_REVIEW; return;)
             when fraud_risk = 'HIGH' then 'DENY'

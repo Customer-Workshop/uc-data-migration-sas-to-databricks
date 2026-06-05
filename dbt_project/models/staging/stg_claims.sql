@@ -23,15 +23,16 @@ with claims as (
 
 active_policies as (
     -- SAS: declare hash h_pol(dataset: "RAW_INS.POLICIES(where=(STATUS='ACTIVE'))");
+    -- Schema mapping: SAS STATUS → policy_status, EXPIRATION_DATE → expiry_date
     select
         policy_id,
         policy_type,
         effective_date,
-        expiration_date,
+        expiry_date,
         sum_insured,
         deductible
     from {{ source('insurance_raw', 'policies') }}
-    where status = 'ACTIVE'
+    where policy_status = 'ACTIVE'
 ),
 
 validated as (
@@ -46,7 +47,7 @@ validated as (
         c.reported_date,
         p.policy_type,
         p.effective_date,
-        p.expiration_date,
+        p.expiry_date,
         p.sum_insured,
         p.deductible
     from claims c
@@ -54,8 +55,9 @@ validated as (
         on c.policy_id = p.policy_id
     -- SAS validation rule 1: policy must exist and be active (enforced by INNER JOIN)
     -- SAS validation rule 2: loss_date within policy period
+    -- Schema mapping: SAS EXPIRATION_DATE → expiry_date
     where c.loss_date >= p.effective_date
-      and c.loss_date <= p.expiration_date
+      and c.loss_date <= p.expiry_date
     -- SAS validation rule 3: claimed_amount <= sum_insured
       and c.claimed_amount <= p.sum_insured
 )
