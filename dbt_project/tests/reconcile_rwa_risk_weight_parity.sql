@@ -42,13 +42,28 @@ expected as (
     union all select 'IRA',  1.00
 )
 
+/* Case (a): expected weight missing from the mart */
 select
     coalesce(m.account_type, e.account_type) as account_type,
     m.risk_weight as actual_weight,
     e.expected_weight,
-    'MISMATCH' as status
+    'MISSING_EXPECTED' as status
 from expected e
 left join mart_weights m
     on e.account_type = m.account_type
     and abs(e.expected_weight - m.risk_weight) < 0.001
 where m.account_type is null
+
+union all
+
+/* Case (b): unexpected weight in the mart not in expected set */
+select
+    m.account_type,
+    m.risk_weight as actual_weight,
+    e.expected_weight,
+    'UNEXPECTED_WEIGHT' as status
+from mart_weights m
+left join expected e
+    on m.account_type = e.account_type
+    and abs(m.risk_weight - e.expected_weight) < 0.001
+where e.account_type is null
