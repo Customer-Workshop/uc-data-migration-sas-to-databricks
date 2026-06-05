@@ -6,18 +6,16 @@
         AND EFFECTIVE_DATE <= val_date
         AND EXPIRATION_DATE >= val_date
 
-  The dbt model (int_policy_valuation) reproduces that contract. This control
-  verifies no silent row loss or fan-out: model row count must equal the
-  expected in-scope population from the raw source.
+  Raw schema mapping: STATUS → policy_status, EXPIRATION_DATE → expiry_date.
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
 with expected_in_scope as (
     select count(*) as n
     from {{ source('insurance_raw', 'policies') }}
-    where status = 'ACTIVE'
+    where policy_status = 'ACTIVE'
         and effective_date <= current_date()
-        and expiration_date >= current_date()
+        and expiry_date >= current_date()
 ),
 
 model_policies as (

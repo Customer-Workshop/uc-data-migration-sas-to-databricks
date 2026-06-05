@@ -5,7 +5,8 @@
   sum(incurred) / sum(earned) computed independently from raw data through
   the same transformation pipeline (in-force filter + claims 12-month window).
 
-  This catches per-type mapping errors that aggregate controls would miss.
+  Raw schema: policies.policy_status, policies.expiry_date;
+              claims.claimed_amount (proxy for SAS incurred_amount).
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
@@ -16,28 +17,28 @@ with raw_earned as (
             p.annual_premium / 12 * least(
                 12,
                 months_between(
-                    least(current_date(), p.expiration_date),
+                    least(current_date(), p.expiry_date),
                     greatest(p.effective_date, date_trunc('year', current_date()))
                 )
             )
         ) as total_earned
     from {{ source('insurance_raw', 'policies') }} p
-    where p.status = 'ACTIVE'
+    where p.policy_status = 'ACTIVE'
         and p.effective_date <= current_date()
-        and p.expiration_date >= current_date()
+        and p.expiry_date >= current_date()
     group by p.policy_type
 ),
 
 raw_incurred as (
     select
         p.policy_type,
-        sum(c.incurred_amount) as total_incurred
+        sum(c.claimed_amount) as total_incurred
     from {{ source('insurance_raw', 'claims') }} c
     inner join {{ source('insurance_raw', 'policies') }} p
         on c.policy_id = p.policy_id
-    where p.status = 'ACTIVE'
+    where p.policy_status = 'ACTIVE'
         and p.effective_date <= current_date()
-        and p.expiration_date >= current_date()
+        and p.expiry_date >= current_date()
         and c.loss_date >= add_months(current_date(), -12)
         and c.loss_date <= current_date()
     group by p.policy_type

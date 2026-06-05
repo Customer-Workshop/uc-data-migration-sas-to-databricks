@@ -6,8 +6,9 @@
     IBNR per policy = max(0, ytd_earned_premium * 0.15 - coalesce(total_paid, 0))
     Total IBNR = sum of per-policy IBNR
 
-  This proves the reserve estimates are not inflated or deflated by the
-  conversion. A tolerance of 0.01 accommodates floating-point rounding.
+  Raw schema: policies.policy_status, policies.expiry_date;
+              claims.claimed_amount + claim_status for paid derivation.
+  A tolerance of 0.01 accommodates floating-point rounding.
 
   dbt singular test convention: FAILS if this query returns any rows.
 */
@@ -17,20 +18,24 @@ with raw_earned as (
         p.annual_premium / 12 * least(
             12,
             months_between(
-                least(current_date(), p.expiration_date),
+                least(current_date(), p.expiry_date),
                 greatest(p.effective_date, date_trunc('year', current_date()))
             )
         ) as ytd_earned_premium
     from {{ source('insurance_raw', 'policies') }} p
-    where p.status = 'ACTIVE'
+    where p.policy_status = 'ACTIVE'
         and p.effective_date <= current_date()
-        and p.expiration_date >= current_date()
+        and p.expiry_date >= current_date()
 ),
 
 raw_paid as (
     select
         c.policy_id,
-        sum(c.paid_amount) as total_paid
+        sum(case
+            when c.claim_status in ('CLOSED', 'SETTLED')
+                then c.claimed_amount
+            else 0
+        end) as total_paid
     from {{ source('insurance_raw', 'claims') }} c
     where c.loss_date >= add_months(current_date(), -12)
         and c.loss_date <= current_date()

@@ -12,34 +12,41 @@
     CTEs replace WORK tables, LEFT JOINs replace MERGE BY + IF a,
     CASE expressions replace DATA step IF/THEN/ELSE logic.
     intck('month',...) → months_between(); intnx('month',...,'B') → date_trunc + add_months.
+
+  Schema mapping (SAS RAW_INS → Databricks insurance_raw):
+    policies: STATUS → policy_status, EXPIRATION_DATE → expiry_date,
+              CUSTOMER_ID → policyholder_id.
+              Columns not in raw: risk_category, underwriting_class, agent_id, branch_code.
+    claims:   INCURRED_AMOUNT → claimed_amount (source-faithful: single monetary field in raw).
+              PAID_AMOUNT / RESERVED_AMOUNT not in raw — derived from claimed_amount + status.
+              Status mapping: SAS OPEN/INV/ADJ/PEND → raw OPEN/PENDING/REOPENED;
+                              SAS DENY → raw DENIED.
+    premiums: PREMIUM_AMOUNT → premium_paid, PAYMENT_DATE → due_date.
+              PAYMENT_STATUS not in raw — returned_premium / late_payments always 0.
 */
 
 with inforce as (
     /* Step 1: Extract in-force policies (SAS PROC SQL → WORK.INFORCE) */
     select
         p.policy_id,
-        p.customer_id,
+        p.policyholder_id,
         p.policy_type,
         p.effective_date,
-        p.expiration_date,
+        p.expiry_date,
         p.annual_premium,
         p.sum_insured,
         p.deductible,
-        p.risk_category,
-        p.underwriting_class,
-        p.agent_id,
-        p.branch_code,
 
         -- SAS: intck('month', EFFECTIVE_DATE, "&val_date"d)
         months_between(current_date(), p.effective_date) as policy_age_months,
 
         -- SAS: intck('month', "&val_date"d, EXPIRATION_DATE)
-        months_between(p.expiration_date, current_date()) as months_to_expiry,
+        months_between(p.expiry_date, current_date()) as months_to_expiry,
 
         -- SAS: EXPIRATION_DATE <= intnx('month', "&val_date"d, 3)
-        -- Note: SAS intnx default alignment is 'B' (beginning of month)
+        -- Source-faithful: SAS intnx default alignment is 'B' (beginning of month)
         case
-            when p.expiration_date <= date_trunc('month', add_months(current_date(), 3))
+            when p.expiry_date <= date_trunc('month', add_months(current_date(), 3))
                 then 'Y'
             else 'N'
         end as renewal_due_flag,
@@ -50,32 +57,48 @@ with inforce as (
         p.annual_premium / 12 * least(
             12,
             months_between(
-                least(current_date(), p.expiration_date),
+                least(current_date(), p.expiry_date),
                 greatest(p.effective_date, date_trunc('year', current_date()))
             )
         ) as ytd_earned_premium
 
     from {{ source('insurance_raw', 'policies') }} p
-    where p.status = 'ACTIVE'
+    where p.policy_status = 'ACTIVE'
         and p.effective_date <= current_date()
-        and p.expiration_date >= current_date()
+        and p.expiry_date >= current_date()
 ),
 
 claims_exp as (
-    /* Step 2: Claims experience — 12-month lookback (SAS PROC SQL → WORK.CLAIMS_EXP) */
+    /*
+      Step 2: Claims experience — 12-month lookback (SAS PROC SQL → WORK.CLAIMS_EXP)
+      Divergence: raw table has claimed_amount only (no incurred/paid/reserved split).
+      total_incurred maps to claimed_amount (source-faithful proxy).
+      total_paid derived from claimed_amount for CLOSED/SETTLED claims.
+      open_reserves derived from claimed_amount for open-status claims.
+      SAS status codes mapped: OPEN/INV/ADJ/PEND → OPEN/PENDING/REOPENED; DENY → DENIED.
+    */
     select
         c.policy_id,
         count(distinct c.claim_id) as num_claims,
-        sum(c.incurred_amount) as total_incurred,
-        sum(c.paid_amount) as total_paid,
-        sum(c.reserved_amount) as total_reserved,
-        max(c.loss_date) as last_claim_date,
+        sum(c.claimed_amount) as total_incurred,
         sum(case
-            when c.claim_status in ('OPEN', 'INV', 'ADJ', 'PEND')
-                then c.reserved_amount
+            when c.claim_status in ('CLOSED', 'SETTLED')
+                then c.claimed_amount
+            else 0
+        end) as total_paid,
+        sum(case
+            when c.claim_status not in ('CLOSED', 'SETTLED', 'DENIED')
+                then c.claimed_amount
+            else 0
+        end) as total_reserved,
+        max(c.loss_date) as last_claim_date,
+        -- SAS: CLAIM_STATUS in ('OPEN','INV','ADJ','PEND') → mapped to raw equivalents
+        sum(case
+            when c.claim_status in ('OPEN', 'PENDING', 'REOPENED')
+                then c.claimed_amount
             else 0
         end) as open_reserves,
-        sum(case when c.claim_status = 'DENY' then 1 else 0 end) as denied_claims
+        sum(case when c.claim_status = 'DENIED' then 1 else 0 end) as denied_claims
     from {{ source('insurance_raw', 'claims') }} c
     where c.loss_date >= add_months(current_date(), -12)
         and c.loss_date <= current_date()
@@ -83,20 +106,20 @@ claims_exp as (
 ),
 
 premium_coll as (
-    /* Step 3: Premium collections — current year (SAS PROC SQL → WORK.PREMIUM_COLL) */
+    /*
+      Step 3: Premium collections — current year (SAS PROC SQL → WORK.PREMIUM_COLL)
+      Divergence: raw premiums table has premium_paid/due_date only (no payment_status).
+      returned_premium and late_payments always 0 (raw lacks status field).
+    */
     select
         policy_id,
-        sum(premium_amount) as collected_premium,
-        sum(case
-            when payment_status = 'RETURNED'
-                then premium_amount
-            else 0
-        end) as returned_premium,
-        max(payment_date) as last_payment_date,
-        count(case when payment_status = 'LATE' then 1 end) as late_payments
+        sum(premium_paid) as collected_premium,
+        cast(0 as double) as returned_premium,
+        max(due_date) as last_payment_date,
+        cast(0 as int) as late_payments
     from {{ source('insurance_raw', 'premiums') }}
-    where payment_date >= date_trunc('year', current_date())
-        and payment_date <= current_date()
+    where due_date >= date_trunc('year', current_date())
+        and due_date <= current_date()
     group by policy_id
 ),
 

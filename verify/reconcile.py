@@ -107,9 +107,9 @@ class Reconciler:
             f"""
             select count(*)
             from {self.raw}.policies
-            where status = 'ACTIVE'
+            where policy_status = 'ACTIVE'
               and effective_date <= current_date()
-              and expiration_date >= current_date()
+              and expiry_date >= current_date()
             """
         )
         actual = self._scalar(
@@ -135,23 +135,23 @@ class Reconciler:
                     select policy_type,
                            sum(annual_premium / 12 * least(12,
                                months_between(
-                                   least(current_date(), expiration_date),
+                                   least(current_date(), expiry_date),
                                    greatest(effective_date, date_trunc('year', current_date()))
                                )
                            )) as total_earned
                     from {self.raw}.policies
-                    where status = 'ACTIVE'
+                    where policy_status = 'ACTIVE'
                       and effective_date <= current_date()
-                      and expiration_date >= current_date()
+                      and expiry_date >= current_date()
                     group by policy_type
                 ),
                 raw_incurred as (
-                    select p.policy_type, sum(c.incurred_amount) as total_incurred
+                    select p.policy_type, sum(c.claimed_amount) as total_incurred
                     from {self.raw}.claims c
                     inner join {self.raw}.policies p on c.policy_id = p.policy_id
-                    where p.status = 'ACTIVE'
+                    where p.policy_status = 'ACTIVE'
                       and p.effective_date <= current_date()
-                      and p.expiration_date >= current_date()
+                      and p.expiry_date >= current_date()
                       and c.loss_date >= add_months(current_date(), -12)
                       and c.loss_date <= current_date()
                     group by p.policy_type
@@ -223,17 +223,19 @@ class Reconciler:
                 select policy_id,
                        annual_premium / 12 * least(12,
                            months_between(
-                               least(current_date(), expiration_date),
+                               least(current_date(), expiry_date),
                                greatest(effective_date, date_trunc('year', current_date()))
                            )
                        ) as ytd_ep
                 from {self.raw}.policies
-                where status = 'ACTIVE'
+                where policy_status = 'ACTIVE'
                   and effective_date <= current_date()
-                  and expiration_date >= current_date()
+                  and expiry_date >= current_date()
             ),
             raw_paid as (
-                select policy_id, sum(paid_amount) as total_paid
+                select policy_id,
+                       sum(case when claim_status in ('CLOSED', 'SETTLED')
+                                then claimed_amount else 0 end) as total_paid
                 from {self.raw}.claims
                 where loss_date >= add_months(current_date(), -12)
                   and loss_date <= current_date()
