@@ -100,9 +100,171 @@ class Reconciler:
             )
         )
 
+    # ---------------------------------------------- policy valuation checks
+    def check_policy_val_completeness(self):
+        """int_policy_valuation row count equals in-scope raw policies."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.policies
+            where status = 'ACTIVE'
+              and effective_date <= current_date()
+              and expiration_date >= current_date()
+            """
+        )
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_policy_valuation"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "policy_val_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope raw policies = {expected}, model rows = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_loss_ratio_parity(self):
+        """agg_loss_ratio per policy_type matches independent raw calculation."""
+        cur = self.con.cursor()
+        try:
+            cur.execute(
+                f"""
+                with raw_earned as (
+                    select policy_type,
+                           sum(annual_premium / 12 * least(12,
+                               months_between(
+                                   least(current_date(), expiration_date),
+                                   greatest(effective_date, date_trunc('year', current_date()))
+                               )
+                           )) as total_earned
+                    from {self.raw}.policies
+                    where status = 'ACTIVE'
+                      and effective_date <= current_date()
+                      and expiration_date >= current_date()
+                    group by policy_type
+                ),
+                raw_incurred as (
+                    select p.policy_type, sum(c.incurred_amount) as total_incurred
+                    from {self.raw}.claims c
+                    inner join {self.raw}.policies p on c.policy_id = p.policy_id
+                    where p.status = 'ACTIVE'
+                      and p.effective_date <= current_date()
+                      and p.expiration_date >= current_date()
+                      and c.loss_date >= add_months(current_date(), -12)
+                      and c.loss_date <= current_date()
+                    group by p.policy_type
+                ),
+                expected as (
+                    select e.policy_type,
+                           case when e.total_earned > 0
+                                then coalesce(i.total_incurred, 0) / e.total_earned
+                                else null end as expected_lr
+                    from raw_earned e
+                    left join raw_incurred i on e.policy_type = i.policy_type
+                ),
+                mart as (
+                    select policy_type, agg_loss_ratio
+                    from {self.marts}.mart_loss_ratios
+                )
+                select e.policy_type, e.expected_lr, m.agg_loss_ratio
+                from expected e
+                full outer join mart m on e.policy_type = m.policy_type
+                where abs(coalesce(e.expected_lr, 0) - coalesce(m.agg_loss_ratio, 0)) > 0.0001
+                   or e.policy_type is null
+                   or m.policy_type is null
+                """
+            )
+            mismatches = cur.fetchall()
+        finally:
+            cur.close()
+        ok = len(mismatches) == 0
+        detail = "all policy types match" if ok else f"{len(mismatches)} type(s) diverge"
+        self.results.append(
+            CheckResult(
+                "loss_ratio_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": len(mismatches)},
+            )
+        )
+
+    def check_premium_adequacy_parity(self):
+        """premium_adequate flag matches SAS rule value-for-value."""
+        miscount = self._scalar(
+            f"""
+            select count(*) from (
+                select policy_id,
+                       premium_adequate as actual,
+                       case when ytd_earned_premium > 0
+                                 and coalesce(total_incurred, 0) / ytd_earned_premium + 0.30 <= 1.0
+                            then 'Y' else 'N' end as expected
+                from {self.intermediate}.int_policy_valuation
+            ) t
+            where actual <> expected
+            """
+        )
+        ok = miscount == 0
+        self.results.append(
+            CheckResult(
+                "premium_adequacy_parity",
+                "PASS" if ok else "FAIL",
+                f"{miscount} row(s) with flag mismatch",
+                {"mismatches": miscount},
+            )
+        )
+
+    def check_ibnr_control_total(self):
+        """Total IBNR ties out to formula applied independently to raw data."""
+        expected = self._scalar(
+            f"""
+            with raw_earned as (
+                select policy_id,
+                       annual_premium / 12 * least(12,
+                           months_between(
+                               least(current_date(), expiration_date),
+                               greatest(effective_date, date_trunc('year', current_date()))
+                           )
+                       ) as ytd_ep
+                from {self.raw}.policies
+                where status = 'ACTIVE'
+                  and effective_date <= current_date()
+                  and expiration_date >= current_date()
+            ),
+            raw_paid as (
+                select policy_id, sum(paid_amount) as total_paid
+                from {self.raw}.claims
+                where loss_date >= add_months(current_date(), -12)
+                  and loss_date <= current_date()
+                group by policy_id
+            )
+            select sum(greatest(0, e.ytd_ep * 0.15 - coalesce(rp.total_paid, 0)))
+            from raw_earned e
+            left join raw_paid rp on e.policy_id = rp.policy_id
+            """
+        )
+        actual = self._scalar(
+            f"select sum(ibnr_estimate) from {self.intermediate}.int_policy_valuation"
+        )
+        diff = abs((expected or 0) - (actual or 0))
+        ok = diff <= 0.01
+        self.results.append(
+            CheckResult(
+                "ibnr_control_total",
+                "PASS" if ok else "FAIL",
+                f"expected = {expected}, model = {actual}, diff = {diff:.4f}",
+                {"expected": expected, "actual": actual, "diff": diff},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_policy_val_completeness()
+        self.check_loss_ratio_parity()
+        self.check_premium_adequacy_parity()
+        self.check_ibnr_control_total()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
