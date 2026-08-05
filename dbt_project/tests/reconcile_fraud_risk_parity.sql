@@ -6,13 +6,26 @@
   threshold change in the model macro therefore returns rows and fails this
   test; it is not a restatement of the same CASE on both sides.
 */
-with boundary_values(fraud_score, expected_fraud_risk) as (
-    values
-        (49.99, 'LOW'),
-        (50.00, 'MEDIUM'),
-        (79.99, 'MEDIUM'),
-        (80.00, 'HIGH'),
-        (cast(null as double), 'LOW')
+with boundary_values as (
+    select
+        cast(49.99 as double) as fraud_score,
+        'LOW' as expected_fraud_risk
+    union all
+    select
+        cast(50.00 as double) as fraud_score,
+        'MEDIUM' as expected_fraud_risk
+    union all
+    select
+        cast(79.99 as double) as fraud_score,
+        'MEDIUM' as expected_fraud_risk
+    union all
+    select
+        cast(80.00 as double) as fraud_score,
+        'HIGH' as expected_fraud_risk
+    union all
+    select
+        cast(null as double) as fraud_score,
+        'LOW' as expected_fraud_risk
 ),
 
 actual as (

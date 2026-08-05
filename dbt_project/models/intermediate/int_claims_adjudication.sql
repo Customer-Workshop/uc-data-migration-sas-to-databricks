@@ -49,12 +49,13 @@ adjudicated as (
         case
             when fraud_risk = 'HIGH' then 'DENY'
             when fraud_risk = 'LOW'
-                 and claimed_amount <= 5000
+                 -- SAS missing numerics sort below every number.
+                 and (claimed_amount is null or claimed_amount <= 5000)
                  and policy_type in ('AUTO', 'HOME', 'RENT')
                 then 'APPR'
             when fraud_risk = 'LOW'
-                 and claimed_amount <= sum_insured * 0.25
-                 and claimed_amount <= 50000
+                 and (claimed_amount is null or claimed_amount <= sum_insured * 0.25)
+                 and (claimed_amount is null or claimed_amount <= 50000)
                 then 'APPR'
             else 'PEND'
         end as adjudication_result,
@@ -62,12 +63,12 @@ adjudicated as (
             when fraud_risk = 'HIGH'
                 then 'High fraud risk - SIU referral'
             when fraud_risk = 'LOW'
-                 and claimed_amount <= 5000
+                 and (claimed_amount is null or claimed_amount <= 5000)
                  and policy_type in ('AUTO', 'HOME', 'RENT')
                 then 'Auto-approved: low risk, small claim'
             when fraud_risk = 'LOW'
-                 and claimed_amount <= sum_insured * 0.25
-                 and claimed_amount <= 50000
+                 and (claimed_amount is null or claimed_amount <= sum_insured * 0.25)
+                 and (claimed_amount is null or claimed_amount <= 50000)
                 then 'Auto-approved: within 25% of sum insured'
             else concat_ws(
                 '; ',
@@ -82,12 +83,12 @@ adjudicated as (
         case
             when fraud_risk = 'HIGH' then 0
             when fraud_risk = 'LOW'
-                 and claimed_amount <= 5000
+                 and (claimed_amount is null or claimed_amount <= 5000)
                  and policy_type in ('AUTO', 'HOME', 'RENT')
                 then greatest(0, coalesce(claimed_amount - deductible, 0))
             when fraud_risk = 'LOW'
-                 and claimed_amount <= sum_insured * 0.25
-                 and claimed_amount <= 50000
+                 and (claimed_amount is null or claimed_amount <= sum_insured * 0.25)
+                 and (claimed_amount is null or claimed_amount <= 50000)
                 then greatest(0, coalesce(claimed_amount - deductible, 0))
             else null
         end as approved_amount
@@ -97,11 +98,7 @@ adjudicated as (
 select
     *,
     case
-        when adjudication_result in ('APPR', 'DENY')
-            then case
-                when adjudication_result = 'DENY' then 'MANUAL_REVIEW'
-                else 'AUTO_ADJUDICATED'
-            end
+        when adjudication_result = 'APPR' then 'AUTO_ADJUDICATED'
         else 'MANUAL_REVIEW'
     end as routing_target
 from adjudicated

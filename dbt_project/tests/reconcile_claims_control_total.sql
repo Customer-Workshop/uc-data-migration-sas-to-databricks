@@ -9,8 +9,8 @@ with valid_claims as (
         c.claim_id,
         c.claimed_amount,
         p.policy_type,
-        c.sum_insured,
-        c.deductible,
+        p.sum_insured,
+        p.deductible,
         f.fraud_score
     from {{ source('insurance_raw', 'claims') }} c
     inner join {{ source('insurance_raw', 'policies') }} p
@@ -34,12 +34,12 @@ expected as (
             case
                 when fraud_score >= 80 then 0
                 when (fraud_score is null or fraud_score < 50)
-                     and claimed_amount <= 5000
+                     and (claimed_amount is null or claimed_amount <= 5000)
                      and policy_type in ('AUTO', 'HOME', 'RENT')
                     then greatest(0, coalesce(claimed_amount - deductible, 0))
                 when (fraud_score is null or fraud_score < 50)
-                     and claimed_amount <= sum_insured * 0.25
-                     and claimed_amount <= 50000
+                     and (claimed_amount is null or claimed_amount <= sum_insured * 0.25)
+                     and (claimed_amount is null or claimed_amount <= 50000)
                     then greatest(0, coalesce(claimed_amount - deductible, 0))
                 else null
             end

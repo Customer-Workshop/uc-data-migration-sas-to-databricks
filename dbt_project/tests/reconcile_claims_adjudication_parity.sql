@@ -7,36 +7,36 @@ with expected as (
         case
             when f.fraud_score >= 80 then 'DENY'
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= 5000
+                 and (c.claimed_amount is null or c.claimed_amount <= 5000)
                  and p.policy_type in ('AUTO', 'HOME', 'RENT')
                 then 'APPR'
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= p.sum_insured * 0.25
-                 and c.claimed_amount <= 50000
+                 and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured * 0.25)
+                 and (c.claimed_amount is null or c.claimed_amount <= 50000)
                 then 'APPR'
             else 'PEND'
         end as expected_result,
         case
             when f.fraud_score >= 80 then 0
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= 5000
+                 and (c.claimed_amount is null or c.claimed_amount <= 5000)
                  and p.policy_type in ('AUTO', 'HOME', 'RENT')
                 then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= p.sum_insured * 0.25
-                 and c.claimed_amount <= 50000
+                 and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured * 0.25)
+                 and (c.claimed_amount is null or c.claimed_amount <= 50000)
                 then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
             else null
         end as expected_approved_amount,
         case
             when f.fraud_score >= 80 then 'MANUAL_REVIEW'
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= 5000
+                 and (c.claimed_amount is null or c.claimed_amount <= 5000)
                  and p.policy_type in ('AUTO', 'HOME', 'RENT')
                 then 'AUTO_ADJUDICATED'
             when (f.fraud_score is null or f.fraud_score < 50)
-                 and c.claimed_amount <= p.sum_insured * 0.25
-                 and c.claimed_amount <= 50000
+                 and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured * 0.25)
+                 and (c.claimed_amount is null or c.claimed_amount <= 50000)
                 then 'AUTO_ADJUDICATED'
             else 'MANUAL_REVIEW'
         end as expected_routing_target

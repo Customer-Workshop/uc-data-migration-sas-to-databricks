@@ -30,24 +30,40 @@ expected_alerts as (
     where fraud_risk = 'HIGH'
 ),
 
-review_mismatches as (
+review_expected_only as (
     select claim_id from expected_review
     except
     select claim_id from review_queue
-    union all
+),
+
+review_actual_only as (
     select claim_id from review_queue
     except
     select claim_id from expected_review
 ),
 
-alert_mismatches as (
-    select claim_id from expected_alerts
-    except
-    select claim_id from alerts
+review_mismatches as (
+    select claim_id from review_expected_only
     union all
+    select claim_id from review_actual_only
+),
+
+alert_expected_only as (
+    select claim_id from expected_alerts
+    except
+    select claim_id from alerts
+),
+
+alert_actual_only as (
     select claim_id from alerts
     except
     select claim_id from expected_alerts
+),
+
+alert_mismatches as (
+    select claim_id from alert_expected_only
+    union all
+    select claim_id from alert_actual_only
 )
 
 select
