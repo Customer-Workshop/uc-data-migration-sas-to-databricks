@@ -173,6 +173,63 @@ models:
         data_tests:
           - not_null
 
+  - name: mart_capital_adequacy
+    description: >
+      Capital adequacy summary derived from monthly RWA.
+      Migrated from monthly_regulatory_reporting.sas (Step 5).
+      Capital values reproduce the SAS hard-coded GL placeholders.
+    columns:
+      - name: report_month
+        data_tests:
+          - not_null
+
+      - name: total_rwa
+        description: Sum of RWA for the reporting month.
+        data_tests:
+          - not_null
+
+      - name: cet1_capital
+        description: SAS GL placeholder CET1 capital.
+        data_tests:
+          - not_null
+
+      - name: tier1_capital
+        description: SAS GL placeholder Tier 1 capital.
+        data_tests:
+          - not_null
+
+      - name: total_capital
+        description: SAS GL placeholder total capital.
+        data_tests:
+          - not_null
+
+      - name: cet1_ratio
+        description: CET1 capital ratio as a percentage.
+
+      - name: tier1_ratio
+        description: Tier 1 capital ratio as a percentage.
+
+      - name: total_capital_ratio
+        description: Total capital ratio as a percentage.
+
+      - name: cet1_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [PASS, FAIL]
+
+      - name: tier1_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [PASS, FAIL]
+
+      - name: total_capital_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [PASS, FAIL]
+
   - name: mart_loss_ratios
     description: >
       Loss ratio summary by line of business (policy type).
