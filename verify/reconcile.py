@@ -77,6 +77,14 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _row(self, query: str):
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchone()
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -100,9 +108,294 @@ class Reconciler:
             )
         )
 
+    def check_risk_score_completeness(self):
+        expected = self._scalar(
+            f"""
+            select count(*) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+              and snapshot_date = current_date()
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_risk_scores")
+        ok = expected == actual
+        self.results.append(CheckResult(
+            "risk_score_completeness", "PASS" if ok else "FAIL",
+            f"expected scored accounts = {expected}, actual scored accounts = {actual}",
+            {"expected": expected, "actual": actual},
+        ))
+
+    def check_risk_ead_control_total(self):
+        expected = self._row(
+            f"""
+            select sum(current_balance), sum(
+                case when account_type in ('CC', 'LOC', 'HELC')
+                     then current_balance + 0.50 * (credit_limit - current_balance)
+                     else current_balance end
+            )
+            from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')
+              and snapshot_date = current_date()
+            """
+        )
+        actual = self._row(
+            f"select sum(current_balance), sum(ead) "
+            f"from {self.marts}.mart_risk_scores"
+        )
+        expected_balance, expected_ead = expected or (None, None)
+        actual_balance, actual_ead = actual or (None, None)
+        ok = (
+            expected_balance is not None
+            and actual_balance is not None
+            and expected_ead is not None
+            and actual_ead is not None
+            and abs(expected_balance - actual_balance) <= 0.01
+            and abs(expected_ead - actual_ead) <= 0.01
+        )
+        self.results.append(CheckResult(
+            "risk_ead_control_total", "PASS" if ok else "FAIL",
+            f"expected balance = {expected_balance}, actual balance = {actual_balance}; "
+            f"expected EAD = {expected_ead}, actual EAD = {actual_ead}; tolerance = 0.01",
+            {"expected_balance": expected_balance, "actual_balance": actual_balance,
+             "expected_ead": expected_ead, "actual_ead": actual_ead},
+        ))
+
+    def check_risk_pd_parity(self):
+        max_diff = self._scalar(
+            f"""
+            with expected as (
+                select
+                    s.account_id,
+                    s.pd,
+                    1.0 / (1.0 + exp(-(
+                        -3.2145
+                        + 0.412 * case
+                            when b.fico_score is null then 0.198
+                            when b.fico_score >= 760 then -1.204
+                            when b.fico_score >= 720 then -0.812
+                            when b.fico_score >= 680 then -0.356
+                            when b.fico_score >= 640 then 0.198
+                            when b.fico_score >= 600 then 0.654
+                            else 1.102 end
+                        + 0.198 * case
+                            when a.utilization_pct is null then 0
+                            when a.utilization_pct <= 10 then -0.956
+                            when a.utilization_pct <= 30 then -0.521
+                            when a.utilization_pct <= 50 then -0.102
+                            when a.utilization_pct <= 70 then 0.334
+                            when a.utilization_pct <= 90 then 0.789
+                            else 1.245 end
+                        + 0.289 * case
+                            when p.pmt_late_90_12mo = 0 then -0.678
+                            when p.pmt_late_90_12mo = 1 then 0.445
+                            when p.pmt_late_90_12mo is null then 0
+                            else 1.567 end
+                        + 0.067 * case
+                            when a.acct_age_months is null then 0
+                            when a.acct_age_months >= 120 then -0.534
+                            when a.acct_age_months >= 60 then -0.289
+                            when a.acct_age_months >= 24 then 0.045
+                            else 0.456 end
+                        + 0.134 * case
+                            when a.account_type not in ('MTG', 'AUTO', 'HELC') then 0
+                            when c.collateral_value is null or c.collateral_value <= 0 then 0
+                            when a.current_balance / c.collateral_value <= 0.60 then -0.712
+                            when a.current_balance / c.collateral_value <= 0.80 then -0.234
+                            when a.current_balance / c.collateral_value <= 1.00 then 0.356
+                            else 0.889 end
+                    ))) as expected_pd
+                from {self.marts}.mart_risk_scores s
+                inner join {self.intermediate}.int_account_metrics a
+                    on s.account_id = a.account_id
+                   and a.snapshot_date = current_date()
+                left join {self.raw}.bureau_scores b on a.customer_id = b.customer_id
+                left join {self.raw}.payment_history p on a.account_id = p.account_id
+                left join {self.raw}.collateral c on a.account_id = c.account_id
+            )
+            select max(abs(pd - expected_pd)) from expected
+            """
+        )
+        max_diff = max_diff or 0.0
+        ok = max_diff <= 1e-9
+        self.results.append(CheckResult(
+            "risk_pd_parity", "PASS" if ok else "FAIL",
+            f"max absolute PD difference = {max_diff}; tolerance = 1e-9",
+            {"max_abs_diff": max_diff},
+        ))
+
+    def check_risk_lgd_ead_parity(self):
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_risk_scores s
+            inner join {self.intermediate}.int_account_metrics a
+                on s.account_id = a.account_id
+               and a.snapshot_date = current_date()
+            left join {self.raw}.collateral c on a.account_id = c.account_id
+            where abs(s.lgd - case
+                when a.account_type in ('MTG', 'AUTO', 'HELC') and c.collateral_value > 0
+                    then greatest(0, least(1, (a.current_balance / c.collateral_value - 0.5) * 0.8))
+                when a.account_type in ('MTG', 'AUTO', 'HELC') then 0.40
+                when a.account_type = 'CC' then 0.75
+                else 0.50 end) > 1e-9
+               or abs(s.ead - case
+                    when a.account_type in ('CC', 'LOC', 'HELC')
+                        then a.current_balance + 0.50 * (a.credit_limit - a.current_balance)
+                    else a.current_balance end) > 1e-9
+            """
+        )
+        mismatches = mismatches or 0
+        self.results.append(CheckResult(
+            "risk_lgd_ead_parity", "PASS" if mismatches == 0 else "FAIL",
+            f"mismatching LGD/EAD rows = {mismatches}",
+            {"mismatches": mismatches},
+        ))
+
+    def check_risk_rating_parity(self):
+        mismatches = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_risk_scores
+            where risk_rating <> case
+                when pd is null or pd >= 0.30 then 7
+                when pd < 0.005 then 1
+                when pd < 0.01 then 2
+                when pd < 0.03 then 3
+                when pd < 0.07 then 4
+                when pd < 0.15 then 5
+                else 6 end
+            """
+        )
+        mismatches = mismatches or 0
+        self.results.append(CheckResult(
+            "risk_rating_parity", "PASS" if mismatches == 0 else "FAIL",
+            f"mismatching risk-rating rows = {mismatches}",
+            {"mismatches": mismatches},
+        ))
+
+    def check_risk_migration_scope(self):
+        expected = self._scalar(
+            f"""
+            with ranked as (
+                select
+                    s.account_id,
+                    a.risk_rating,
+                    case upper(a.risk_rating) when 'LOW' then 1 when 'MEDIUM' then 2
+                        when 'HIGH' then 3 end as prev_rank,
+                    case when s.risk_rating in (1, 2) then 1
+                         when s.risk_rating in (3, 4, 5) then 2
+                         when s.risk_rating in (6, 7) then 3 end as curr_rank
+                from {self.marts}.mart_risk_scores s
+                inner join {self.intermediate}.int_account_metrics a
+                    on s.account_id = a.account_id
+                   and a.snapshot_date = current_date()
+            )
+            select count(*) from ranked
+            where risk_rating is null or prev_rank <> curr_rank
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_risk_migration")
+        direction_mismatches = self._scalar(
+            f"""
+            with expected as (
+                select
+                    s.account_id,
+                    case
+                        when a.risk_rating is null then 'NEW'
+                        when (case when s.risk_rating in (1, 2) then 1
+                                   when s.risk_rating in (3, 4, 5) then 2
+                                   else 3 end)
+                           < (case upper(a.risk_rating) when 'LOW' then 1
+                                   when 'MEDIUM' then 2 else 3 end) then 'UPGRADE'
+                        else 'DOWNGRADE'
+                    end as direction
+                from {self.marts}.mart_risk_scores s
+                inner join {self.intermediate}.int_account_metrics a
+                    on s.account_id = a.account_id
+                   and a.snapshot_date = current_date()
+                where a.risk_rating is null
+                   or upper(a.risk_rating) <> case
+                        when s.risk_rating in (1, 2) then 'LOW'
+                        when s.risk_rating in (3, 4, 5) then 'MEDIUM'
+                        else 'HIGH' end
+            )
+            select count(*)
+            from expected e
+            inner join {self.marts}.mart_risk_migration m on e.account_id = m.account_id
+            where e.direction <> m.migration_direction
+            """
+        )
+        stable = self._scalar(
+            f"select count(*) from {self.marts}.mart_risk_migration "
+            "where migration_direction = 'STABLE'"
+        )
+        ok = expected == actual and direction_mismatches == 0 and stable == 0
+        self.results.append(CheckResult(
+            "risk_migration_scope", "PASS" if ok else "FAIL",
+            f"expected migration rows = {expected}, actual = {actual}; "
+            f"direction mismatches = {direction_mismatches}; STABLE rows = {stable}",
+            {"expected": expected, "actual": actual,
+             "direction_mismatches": direction_mismatches, "stable": stable},
+        ))
+
+    def check_risk_summary_totals(self):
+        values = self._row(
+            f"""
+            select
+                (select sum(n_accounts) from {self.marts}.mart_risk_summary),
+                (select count(*) from {self.marts}.mart_risk_scores),
+                (select sum(total_ead) from {self.marts}.mart_risk_summary),
+                (select sum(ead) from {self.marts}.mart_risk_scores),
+                (select sum(total_el) from {self.marts}.mart_risk_summary),
+                (select sum(expected_loss) from {self.marts}.mart_risk_scores),
+                (select count(*) from {self.marts}.mart_risk_summary),
+                (select count(distinct concat(account_type, '|', cast(risk_rating as string)))
+                 from {self.marts}.mart_risk_scores)
+            """
+        )
+        if values is None:
+            self.results.append(CheckResult(
+                "risk_summary_totals",
+                "FAIL",
+                "summary totals query returned no row",
+            ))
+            return
+        (summary_n, score_n, summary_ead, score_ead, summary_el, score_el,
+         summary_groups, score_groups) = values
+        ok = (
+            summary_n is not None
+            and score_n is not None
+            and score_n is not None
+            and summary_ead is not None
+            and score_ead is not None
+            and summary_el is not None
+            and score_el is not None
+            and summary_n == score_n
+            and abs(summary_ead - score_ead) <= 0.01
+            and abs(summary_el - score_el) <= 0.01
+            and summary_groups == score_groups
+        )
+        self.results.append(CheckResult(
+            "risk_summary_totals", "PASS" if ok else "FAIL",
+            f"summary n = {summary_n}, scores n = {score_n}; "
+            f"summary EAD = {summary_ead}, scores EAD = {score_ead}; "
+            f"summary EL = {summary_el}, scores EL = {score_el}; "
+            f"summary groups = {summary_groups}, score groups = {score_groups}",
+            {"summary_n": summary_n, "score_n": score_n,
+             "summary_ead": summary_ead, "score_ead": score_ead,
+             "summary_el": summary_el, "score_el": score_el,
+             "summary_groups": summary_groups, "score_groups": score_groups},
+        ))
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_risk_score_completeness()
+        self.check_risk_ead_control_total()
+        self.check_risk_pd_parity()
+        self.check_risk_lgd_ead_parity()
+        self.check_risk_rating_parity()
+        self.check_risk_migration_scope()
+        self.check_risk_summary_totals()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 

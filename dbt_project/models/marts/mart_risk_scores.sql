@@ -11,6 +11,20 @@
     Mathematical functions replace SAS exp() and computed fields
     This is one of the more complex migrations: SAS DATA step
     business logic maps to a SQL model with nested CASE expressions
+
+  Documented limitations:
+    - SAS selects the latest bureau row with SCORE_DATE <= &score_date.
+      banking_raw.bureau_scores has no score_date and is one row per customer,
+      so latest-row selection is not reproducible; the fan-out/completeness
+      control guards this limitation.
+    - VANTAGE_SCORE, BUREAU_TRADES_OPEN, BUREAU_UTIL_PCT,
+      BUREAU_OLDEST_TRADE_MO, PMT_ONTIME_12MO, PMT_LATE_30_12MO,
+      PMT_LATE_60_12MO, MONTHS_SINCE_LAST_DPD, AVG_PMT_RATIO_12MO, and
+      LAST_APPRAISAL_DATE are not present in the migrated raw estate and are
+      therefore not carried. None feed the scorecard math, so there is no
+      scoring impact.
+    - SAS PROC APPEND accumulates history into CURATED.RISK_SCORES; this dbt
+      table materialization fully replaces the current score date.
 */
 
 with score_input as (
@@ -44,6 +58,7 @@ with score_input as (
     left join {{ source('banking_raw', 'collateral') }} c
         on a.account_id = c.account_id
     where a.account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+      and a.snapshot_date = current_date()
 ),
 
 -- SAS: WOE (Weight of Evidence) binning from DATA step
@@ -52,6 +67,8 @@ woe_scored as (
         *,
 
         -- SAS: WOE_FICO variable
+        -- Source-faithful quirk: missing FICO uses 0.198, unlike other
+        -- missing features, which default to zero.
         case
             when fico_score >= 760 then -1.204
             when fico_score >= 720 then -0.812
@@ -91,6 +108,8 @@ woe_scored as (
         end as woe_age,
 
         -- SAS: WOE_LTV variable (secured only)
+        -- Source-faithful quirk: negative current_balance can yield a
+        -- negative LTV and therefore enters the best <= 0.60 bin.
         case
             when account_type not in ('MTG','AUTO','HELC') then 0
             when ltv <= 0.60 then -0.712
@@ -128,6 +147,8 @@ pd_calc as (
         -- SAS: LGD estimation
         case
             when account_type in ('MTG','AUTO','HELC') and ltv is not null
+                -- Source-faithful quirk: known LTV <= 0.5 clamps to 0.0,
+                -- while missing LTV receives 0.40.
                 then greatest(0, least(1, (ltv - 0.5) * 0.8))
             when account_type in ('MTG','AUTO','HELC')
                 then 0.40
@@ -136,6 +157,9 @@ pd_calc as (
         end as lgd,
 
         -- SAS: EAD estimation
+        -- Source-faithful quirk: CC/LOC/HELC use a 50% conversion factor
+        -- for undrawn limit, so over-limit balances can produce EAD below
+        -- the drawn balance.
         case
             when account_type in ('CC','LOC','HELC')
                 then current_balance + 0.50 * (credit_limit - current_balance)
@@ -150,6 +174,7 @@ select
     customer_id,
     account_type,
     current_balance,
+    credit_limit,
     fico_score,
     utilization_pct,
     acct_age_months,
@@ -160,6 +185,8 @@ select
     pd * lgd * ead as expected_loss,
 
     -- SAS: Risk Rating assignment
+    -- Source-faithful quirk: the catch-all assigns worst rating 7 to any
+    -- PD >= 0.30 or null PD.
     case
         when pd < 0.005 then 1
         when pd < 0.01  then 2

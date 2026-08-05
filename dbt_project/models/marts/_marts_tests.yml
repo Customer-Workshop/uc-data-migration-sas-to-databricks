@@ -84,6 +84,81 @@ models:
         data_tests:
           - not_null
 
+  - name: mart_risk_migration
+    description: >
+      Risk-rating migration rows for accounts whose previous categorical
+      rating band differs from the new numeric score band, or whose previous
+      rating is null. Migrated from credit_risk_scoring.sas Step 3.
+    columns:
+      - name: score_date
+        data_tests:
+          - not_null
+      - name: account_id
+        data_tests:
+          - not_null
+          - unique
+      - name: prev_rating
+        data_tests:
+          - accepted_values:
+              values: [LOW, MEDIUM, HIGH]
+      - name: prev_rating_band
+        data_tests:
+          - accepted_values:
+              values: [LOW, MEDIUM, HIGH]
+      - name: curr_rating
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+      - name: curr_rating_band
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [LOW, MEDIUM, HIGH]
+      - name: migration_direction
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [NEW, UPGRADE, DOWNGRADE, STABLE]
+      - name: pd
+        data_tests:
+          - not_null
+      - name: expected_loss
+        data_tests:
+          - not_null
+
+  - name: mart_risk_summary
+    description: >
+      Risk score summary by account type and numeric risk rating. Migrated
+      from credit_risk_scoring.sas Step 5 PROC MEANS nway.
+    columns:
+      - name: score_date
+        data_tests:
+          - not_null
+      - name: account_type
+        data_tests:
+          - not_null
+      - name: risk_rating
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+      - name: n_accounts
+        data_tests:
+          - not_null
+      - name: avg_pd
+        data_tests:
+          - not_null
+      - name: avg_lgd
+        data_tests:
+          - not_null
+      - name: total_ead
+        data_tests:
+          - not_null
+      - name: total_el
+        data_tests:
+          - not_null
+
   - name: mart_transaction_anomalies
     description: >
       Flagged anomalous transactions using Z-score and rule-based
