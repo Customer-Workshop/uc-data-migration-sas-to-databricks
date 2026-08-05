@@ -242,3 +242,80 @@ models:
                 - Profitable
                 - Marginal
                 - Unprofitable
+
+  - name: mart_claims_register
+    description: >
+      Full current claims register produced by the claims adjudication
+      conversion. Replaces SAS STG_INS.CLAIMS_REGISTER PROC APPEND output.
+    columns:
+      - name: claim_id
+        description: Primary key — unique adjudicated claim.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: policy_id
+        data_tests:
+          - not_null
+
+      - name: adjudication_result
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['APPR', 'DENY', 'PEND']
+
+      - name: routing_target
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['AUTO_ADJUDICATED', 'MANUAL_REVIEW']
+
+      - name: processing_date
+        data_tests:
+          - not_null
+
+      - name: claim_status
+        data_tests:
+          - not_null
+
+      - name: claim_status_desc
+        data_tests:
+          - not_null
+
+  - name: mart_claims_review_queue
+    description: >
+      Claims routed to SAS MANUAL_REVIEW, including high-risk denials and
+      catch-all pending claims.
+    columns:
+      - name: claim_id
+        data_tests:
+          - unique
+          - not_null
+
+      - name: routing_target
+        data_tests:
+          - accepted_values:
+              values: ['MANUAL_REVIEW']
+
+  - name: mart_fraud_alerts
+    description: >
+      High-risk claims routed to the SAS fraud-alert append target.
+      Indicator flags are unavailable in the Databricks source.
+    columns:
+      - name: claim_id
+        data_tests:
+          - unique
+          - not_null
+
+      - name: fraud_risk
+        data_tests:
+          - accepted_values:
+              values: ['HIGH']
+
+      - name: alert_reason
+        data_tests:
+          - not_null
+
+      - name: alert_date
+        data_tests:
+          - not_null

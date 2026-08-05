@@ -94,9 +94,26 @@ models:
           - accepted_values:
               values: ['HIGH', 'MEDIUM', 'LOW']
 
-      - name: claimed_amount
+      - name: fraud_score
+        description: Fraud score from the claim-keyed fraud indicator source.
+
+      - name: adjudication_reason
+        description: SAS-ordered auto-adjudication or manual-review reason.
         data_tests:
           - not_null
+
+      - name: claimed_amount
+        description: Amount claimed; SAS allows missing values through Step 1.
+
+      - name: approved_amount
+        description: SAS-approved amount; NULL for manual-review claims.
+
+      - name: routing_target
+        description: SAS output dataset represented as AUTO_ADJUDICATED or MANUAL_REVIEW.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['AUTO_ADJUDICATED', 'MANUAL_REVIEW']
 
   - name: int_policy_valuation
     description: >

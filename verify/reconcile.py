@@ -100,9 +100,237 @@ class Reconciler:
             )
         )
 
+    def check_claims_completeness(self):
+        """Claims register equals the independently derived valid population."""
+        expected = self._scalar(
+            f"""
+            select count(*)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p
+                on c.policy_id = p.policy_id
+               and p.policy_status = 'ACTIVE'
+            where c.loss_date is not null
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured)
+            """
+        )
+        actual = self._scalar(f"select count(*) from {self.marts}.mart_claims_register")
+        duplicate_claims = self._scalar(
+            f"""
+            select count(*)
+            from (
+                select claim_id
+                from {self.marts}.mart_claims_register
+                group by claim_id
+                having count(*) > 1
+            )
+            """
+        )
+        ok = expected == actual and duplicate_claims == 0
+        self.results.append(
+            CheckResult(
+                "claims_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope raw claims = {expected}, register claims = {actual}, "
+                f"duplicate claim ids = {duplicate_claims}",
+                {
+                    "expected": expected,
+                    "actual": actual,
+                    "duplicate_claims": duplicate_claims,
+                },
+            )
+        )
+
+    def check_claims_control_total(self):
+        """Claimed and SAS-approved amount totals must tie to raw inputs."""
+        expected_claimed = self._scalar(
+            f"""
+            select sum(c.claimed_amount)
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p
+                on c.policy_id = p.policy_id
+               and p.policy_status = 'ACTIVE'
+            where c.loss_date is not null
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured)
+            """
+        )
+        expected_approved = self._scalar(
+            f"""
+            select sum(
+                case
+                    when f.fraud_score >= 80 then 0
+                    when (f.fraud_score is null or f.fraud_score < 50)
+                         and c.claimed_amount <= 5000
+                         and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                        then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
+                    when (f.fraud_score is null or f.fraud_score < 50)
+                         and c.claimed_amount <= p.sum_insured * 0.25
+                         and c.claimed_amount <= 50000
+                        then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
+                    else null
+                end
+            )
+            from {self.raw}.claims c
+            inner join {self.raw}.policies p
+                on c.policy_id = p.policy_id
+               and p.policy_status = 'ACTIVE'
+            left join {self.raw}.fraud_indicators f
+                on c.claim_id = f.claim_id
+            where c.loss_date is not null
+              and c.loss_date >= p.effective_date
+              and c.loss_date <= p.expiry_date
+              and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured)
+            """
+        )
+        actual_claimed = self._scalar(
+            f"select sum(claimed_amount) from {self.marts}.mart_claims_register"
+        )
+        actual_approved = self._scalar(
+            f"select sum(approved_amount) from {self.marts}.mart_claims_register"
+        )
+        ok = expected_claimed == actual_claimed and expected_approved == actual_approved
+        self.results.append(
+            CheckResult(
+                "claims_control_total",
+                "PASS" if ok else "FAIL",
+                f"claimed raw/model = {expected_claimed}/{actual_claimed}, "
+                f"approved raw/model = {expected_approved}/{actual_approved}",
+                {
+                    "expected_claimed": expected_claimed,
+                    "actual_claimed": actual_claimed,
+                    "expected_approved": expected_approved,
+                    "actual_approved": actual_approved,
+                },
+            )
+        )
+
+    def check_claims_adjudication_parity(self):
+        """Every register row must match the independently derived SAS branch."""
+        mismatches = self._scalar(
+            f"""
+            with expected as (
+                select
+                    c.claim_id,
+                    case
+                        when f.fraud_score >= 80 then 'DENY'
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= 5000
+                             and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                            then 'APPR'
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= p.sum_insured * 0.25
+                             and c.claimed_amount <= 50000
+                            then 'APPR'
+                        else 'PEND'
+                    end as adjudication_result,
+                    case
+                        when f.fraud_score >= 80 then 0
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= 5000
+                             and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                            then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= p.sum_insured * 0.25
+                             and c.claimed_amount <= 50000
+                            then greatest(0, coalesce(c.claimed_amount - p.deductible, 0))
+                        else null
+                    end as approved_amount,
+                    case
+                        when f.fraud_score >= 80 then 'MANUAL_REVIEW'
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= 5000
+                             and p.policy_type in ('AUTO', 'HOME', 'RENT')
+                            then 'AUTO_ADJUDICATED'
+                        when (f.fraud_score is null or f.fraud_score < 50)
+                             and c.claimed_amount <= p.sum_insured * 0.25
+                             and c.claimed_amount <= 50000
+                            then 'AUTO_ADJUDICATED'
+                        else 'MANUAL_REVIEW'
+                    end as routing_target
+                from {self.raw}.claims c
+                inner join {self.raw}.policies p
+                    on c.policy_id = p.policy_id
+                   and p.policy_status = 'ACTIVE'
+                left join {self.raw}.fraud_indicators f
+                    on c.claim_id = f.claim_id
+                where c.loss_date is not null
+                  and c.loss_date >= p.effective_date
+                  and c.loss_date <= p.expiry_date
+                  and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured)
+            )
+            select count(*)
+            from expected e
+            left join {self.intermediate}.int_claims_adjudication a
+                on e.claim_id = a.claim_id
+            where a.claim_id is null
+               or e.adjudication_result <> a.adjudication_result
+               or not (e.approved_amount <=> a.approved_amount)
+               or e.routing_target <> a.routing_target
+            """
+        )
+        ok = mismatches == 0
+        self.results.append(
+            CheckResult(
+                "claims_adjudication_parity",
+                "PASS" if ok else "FAIL",
+                f"adjudication parity mismatches = {mismatches}",
+                {"mismatches": mismatches},
+            )
+        )
+
+    def check_fraud_alert_boundedness(self):
+        """Fraud alerts must reference valid claims and register rows."""
+        out_of_scope = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_fraud_alerts a
+            left join (
+                select distinct c.claim_id
+                from {self.raw}.claims c
+                inner join {self.raw}.policies p
+                    on c.policy_id = p.policy_id
+                   and p.policy_status = 'ACTIVE'
+                where c.loss_date is not null
+                  and c.loss_date >= p.effective_date
+                  and c.loss_date <= p.expiry_date
+                  and (c.claimed_amount is null or c.claimed_amount <= p.sum_insured)
+            ) valid
+                on a.claim_id = valid.claim_id
+            where valid.claim_id is null
+            """
+        )
+        not_in_register = self._scalar(
+            f"""
+            select count(*)
+            from {self.marts}.mart_fraud_alerts a
+            left join {self.marts}.mart_claims_register r
+                on a.claim_id = r.claim_id
+            where r.claim_id is null
+            """
+        )
+        ok = out_of_scope == 0 and not_in_register == 0
+        self.results.append(
+            CheckResult(
+                "fraud_alert_boundedness",
+                "PASS" if ok else "FAIL",
+                f"out-of-scope alerts = {out_of_scope}, alerts not in register = {not_in_register}",
+                {
+                    "out_of_scope": out_of_scope,
+                    "not_in_register": not_in_register,
+                },
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_claims_completeness()
+        self.check_claims_control_total()
+        self.check_claims_adjudication_parity()
+        self.check_fraud_alert_boundedness()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 

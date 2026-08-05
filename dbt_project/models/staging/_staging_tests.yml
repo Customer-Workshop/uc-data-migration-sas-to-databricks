@@ -166,8 +166,6 @@ models:
 
       - name: claimed_amount
         description: Amount claimed — validated to not exceed sum_insured.
-        data_tests:
-          - not_null
 
       - name: loss_date
         description: Date of loss — validated within policy period.
@@ -176,5 +174,30 @@ models:
 
       - name: reported_date
         description: Date the claim was reported.
+        data_tests:
+          - not_null
+
+      - name: policy_type
+        description: Policy line of business from the active policy lookup.
+        data_tests:
+          - not_null
+
+      - name: effective_date
+        description: Policy effective date from the active policy lookup.
+        data_tests:
+          - not_null
+
+      - name: expiry_date
+        description: Policy expiry date; SAS EXPIRATION_DATE equivalent.
+        data_tests:
+          - not_null
+
+      - name: sum_insured
+        description: Policy coverage limit used for claim validation.
+        data_tests:
+          - not_null
+
+      - name: deductible
+        description: Policy deductible used by auto-adjudication.
         data_tests:
           - not_null
