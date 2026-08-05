@@ -144,17 +144,43 @@ def generate(customers: int, accounts: int, days: int, seed: int):
                 "description": f"{ttype} {fake.bs()[:40]}",
             })
 
+    # ORA_DW.LOAN_DETAILS in the SAS estate carries one row per lending account
+    # (revolving + term) with the LTV / delinquency / allowance attributes that
+    # monthly_regulatory_reporting.sas reads. LTV mirrors the collateral file so
+    # the regulatory risk weights and the scorecard agree on the same value; it
+    # is absent for unsecured lending, exactly as in the source estate.
+    collateral_value_by_account = {c["account_id"]: c["collateral_value"] for c in collateral}
     loans = []
     for acct in accts:
-        if acct["account_type"] in ("MTG", "AUTO", "PERS"):
-            loans.append({
-                "loan_id": f"LN{acct['account_id'][4:]}",
-                "account_id": acct["account_id"],
-                "principal": round(abs(acct["current_balance"]) + rnd.uniform(1_000, 50_000), 2),
-                "rate": acct["interest_rate"],
-                "term_months": rnd.choice([36, 48, 60, 120, 180, 360]),
-                "origination_date": acct["open_date"],
-            })
+        if acct["account_type"] not in LENDING:
+            continue
+        balance = max(acct["current_balance"], 0.0)
+        coll_value = collateral_value_by_account.get(acct["account_id"])
+        days_past_due = rnd.choices(
+            [0, rnd.randint(1, 29), rnd.randint(30, 59), rnd.randint(60, 89),
+             rnd.randint(90, 119), rnd.randint(120, 179), rnd.randint(180, 400)],
+            weights=[78, 9, 5, 3, 2, 2, 1],
+        )[0]
+        if days_past_due >= 90:
+            allowance = round(balance * rnd.uniform(0.25, 0.65), 2)
+        elif days_past_due >= 30:
+            allowance = round(balance * rnd.uniform(0.05, 0.20), 2)
+        else:
+            allowance = round(balance * rnd.uniform(0.004, 0.02), 2)
+        loans.append({
+            "loan_id": f"LN{acct['account_id'][4:]}",
+            "account_id": acct["account_id"],
+            "principal": round(abs(acct["current_balance"]) + rnd.uniform(1_000, 50_000), 2),
+            "rate": acct["interest_rate"],
+            "term_months": rnd.choice([36, 48, 60, 120, 180, 360]),
+            "origination_date": acct["open_date"],
+            "ltv": round(balance / coll_value, 4) if coll_value else None,
+            "days_past_due": days_past_due,
+            "past_due_amount": (
+                0.0 if days_past_due == 0 else round(balance * rnd.uniform(0.01, 0.09), 2)
+            ),
+            "allowance_amt": allowance,
+        })
 
     return {
         "cust_demographics": demographics,
@@ -254,6 +280,8 @@ SCHEMAS = {
     "loan_details": {
         "loan_id": "STRING", "account_id": "STRING", "principal": "DOUBLE",
         "rate": "DOUBLE", "term_months": "INT", "origination_date": "DATE",
+        "ltv": "DOUBLE", "days_past_due": "INT", "past_due_amount": "DOUBLE",
+        "allowance_amt": "DOUBLE",
     },
     "policies": {
         "policy_id": "STRING", "policy_type": "STRING", "policyholder_id": "STRING",
