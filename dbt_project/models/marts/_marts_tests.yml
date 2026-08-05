@@ -50,6 +50,60 @@ models:
         data_tests:
           - not_null
 
+      - name: pre_txn_balance
+        description: >
+          The account's CURRENT_BALANCE. Source-faithful: the SAS program carries
+          the static account balance on every transaction of the account, not the
+          balance immediately preceding the transaction.
+        data_tests:
+          - not_null
+
+      - name: post_txn_balance
+        description: >
+          PRE_TXN_BALANCE adjusted for this single transaction (SAS Step 2 CASE).
+          Not cumulative — differs from running_balance for accounts with more
+          than one transaction, as in the source.
+        data_tests:
+          - not_null
+
+      - name: balance_delta
+        description: >
+          Signed balance movement for the transaction type, mirroring the SAS
+          CASE/IF-ELSE chain (TRF/ADJ add the signed amount; the catch-all else
+          is 0).
+        data_tests:
+          - not_null
+
+  - name: mart_running_balances
+    description: >
+      Persisted per-transaction running balances. Migrated from
+      daily_transaction_processing.sas (Step 6: DATA CURATED.RUNNING_BALANCES
+      keeping ACCOUNT_ID, TRANSACTION_DATE, TRANSACTION_ID, RUNNING_BALANCE).
+      Full-refresh table, matching the SAS DATA step that replaces the dataset
+      each run.
+    columns:
+      - name: transaction_id
+        description: Primary key — one row per processed transaction.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('mart_daily_transactions')
+              field: account_id
+
+      - name: transaction_date
+        data_tests:
+          - not_null
+
+      - name: running_balance
+        description: Cumulative BY-group balance carried from the transaction mart.
+        data_tests:
+          - not_null
+
   - name: mart_risk_scores
     description: >
       Credit risk scores using WOE (Weight of Evidence) logistic
