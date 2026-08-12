@@ -146,14 +146,31 @@ def generate(customers: int, accounts: int, days: int, seed: int):
 
     loans = []
     for acct in accts:
-        if acct["account_type"] in ("MTG", "AUTO", "PERS"):
+        if acct["account_type"] in LENDING:
+            bal = acct["current_balance"]
+            # servicing fields mirror ORA_DW.LOAN_DETAILS in the SAS estate
+            # (LTV, DAYS_PAST_DUE, PAST_DUE_AMOUNT, ALLOWANCE_AMT); LTV is
+            # secured-only and occasionally missing, as in the source CSVs
+            if acct["account_type"] in ("MTG", "AUTO", "HELC"):
+                ltv = None if rnd.random() < 0.10 else round(rnd.uniform(0.30, 1.10), 4)
+            else:
+                ltv = None
+            dpd = rnd.choices(
+                [0, rnd.randint(1, 29), rnd.randint(30, 59), rnd.randint(60, 89),
+                 rnd.randint(90, 119), rnd.randint(120, 179), rnd.randint(180, 400)],
+                weights=[12, 4, 3, 2, 1, 1, 1],
+            )[0]
             loans.append({
                 "loan_id": f"LN{acct['account_id'][4:]}",
                 "account_id": acct["account_id"],
-                "principal": round(abs(acct["current_balance"]) + rnd.uniform(1_000, 50_000), 2),
+                "principal": round(abs(bal) + rnd.uniform(1_000, 50_000), 2),
                 "rate": acct["interest_rate"],
                 "term_months": rnd.choice([36, 48, 60, 120, 180, 360]),
                 "origination_date": acct["open_date"],
+                "ltv": ltv,
+                "days_past_due": dpd,
+                "past_due_amount": 0.0 if dpd == 0 else round(abs(bal) * rnd.uniform(0.01, 0.20), 2),
+                "allowance_amt": round(abs(bal) * rnd.uniform(0.005, 0.05), 2),
             })
 
     return {
@@ -254,6 +271,8 @@ SCHEMAS = {
     "loan_details": {
         "loan_id": "STRING", "account_id": "STRING", "principal": "DOUBLE",
         "rate": "DOUBLE", "term_months": "INT", "origination_date": "DATE",
+        "ltv": "DOUBLE", "days_past_due": "INT", "past_due_amount": "DOUBLE",
+        "allowance_amt": "DOUBLE",
     },
     "policies": {
         "policy_id": "STRING", "policy_type": "STRING", "policyholder_id": "STRING",

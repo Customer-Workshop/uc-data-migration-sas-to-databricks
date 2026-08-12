@@ -77,6 +77,14 @@ class Reconciler:
         finally:
             cur.close()
 
+    def _rows(self, query: str):
+        cur = self.con.cursor()
+        try:
+            cur.execute(query)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
     # ------------------------------------------------------------------ checks
     def check_account_completeness(self):
         """Model accounts must equal the documented in-scope raw population."""
@@ -100,9 +108,176 @@ class Reconciler:
             )
         )
 
+    def check_rwa_completeness(self):
+        """RWA mart must cover every account in the snapshot (SAS Step 1 has no filter)."""
+        expected = self._scalar(f"select count(*) from {self.intermediate}.int_account_metrics")
+        actual = self._scalar(f"select sum(n_accounts) from {self.marts}.mart_regulatory_rwa")
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "rwa_completeness",
+                "PASS" if ok else "FAIL",
+                f"snapshot accounts = {expected}, mart accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_control_total(self):
+        """Total exposure must tie out to SUM(CURRENT_BALANCE) of the snapshot."""
+        expected = self._scalar(
+            f"select sum(current_balance) from {self.intermediate}.int_account_metrics"
+        )
+        actual = self._scalar(f"select sum(total_exposure) from {self.marts}.mart_regulatory_rwa")
+        ok = expected is not None and actual is not None and abs(actual - expected) <= 0.01
+        self.results.append(
+            CheckResult(
+                "rwa_control_total",
+                "PASS" if ok else "FAIL",
+                f"snapshot balance = {expected:,.2f}, mart exposure = {actual:,.2f}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_rwa_risk_weight_parity(self):
+        """Per-type risk weights must match the SAS mapping value-for-value.
+
+        Recomputes the Basel III CASE from monthly_regulatory_reporting.sas
+        (the source of truth) per account, including the SAS quirks: LOC is
+        explicitly 1.00 (not 0.75), and a missing LTV mortgage gets 0.35
+        because SAS missing compares below any number.
+        """
+        mismatches = self._rows(
+            f"""
+            with expected as (
+                select distinct
+                    a.account_type,
+                    case
+                        when a.account_type in ('CHK','SAV','MMA') then 0.00
+                        when a.account_type = 'CD' then 0.00
+                        when a.account_type = 'MTG' and (l.ltv <= 0.80 or l.ltv is null) then 0.35
+                        when a.account_type = 'MTG' and l.ltv > 0.80 then 0.50
+                        when a.account_type = 'HELC' then 0.50
+                        when a.account_type in ('AUTO','PERS') then 0.75
+                        when a.account_type = 'CC' then 0.75
+                        when a.account_type = 'LOC' then 1.00
+                        else 1.00
+                    end as risk_weight
+                from {self.intermediate}.int_account_metrics a
+                left join {self.raw}.loan_details l on a.account_id = l.account_id
+            ),
+            actual as (
+                select distinct account_type, risk_weight
+                from {self.marts}.mart_regulatory_rwa
+            )
+            select
+                coalesce(e.account_type, a.account_type) as account_type,
+                e.risk_weight as expected_weight,
+                a.risk_weight as actual_weight
+            from expected e
+            full outer join actual a
+                on e.account_type = a.account_type and e.risk_weight = a.risk_weight
+            where e.account_type is null or a.account_type is null
+            """
+        )
+        ok = len(mismatches) == 0
+        detail = (
+            "every account-type risk weight matches the SAS mapping"
+            if ok
+            else "; ".join(
+                f"{m[0]}: expected {m[1]}, actual {m[2]}" for m in mismatches
+            )
+        )
+        self.results.append(
+            CheckResult(
+                "rwa_risk_weight_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": len(mismatches)},
+            )
+        )
+
+    def check_delinquency_completeness(self):
+        """Aging mart must cover exactly the SAS Step 2 lending scope."""
+        expected = self._scalar(
+            f"""
+            select count(*) from {self.intermediate}.int_account_metrics
+            where account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+            """
+        )
+        actual = self._scalar(
+            f"select sum(n_accounts) from {self.marts}.mart_delinquency_aging"
+        )
+        ok = expected == actual
+        self.results.append(
+            CheckResult(
+                "delinquency_completeness",
+                "PASS" if ok else "FAIL",
+                f"in-scope lending accounts = {expected}, mart accounts = {actual}",
+                {"expected": expected, "actual": actual},
+            )
+        )
+
+    def check_delinquency_bucket_parity(self):
+        """Per-bucket counts must match the SAS aging bands, including 'Unknown'."""
+        mismatches = self._rows(
+            f"""
+            with expected as (
+                select
+                    case
+                        when l.days_past_due = 0 then 'Current'
+                        when l.days_past_due between 1 and 29 then '1-29'
+                        when l.days_past_due between 30 and 59 then '30-59'
+                        when l.days_past_due between 60 and 89 then '60-89'
+                        when l.days_past_due between 90 and 119 then '90-119'
+                        when l.days_past_due between 120 and 179 then '120-179'
+                        when l.days_past_due >= 180 then '180+'
+                        else 'Unknown'
+                    end as delinq_bucket,
+                    count(*) as n
+                from {self.intermediate}.int_account_metrics a
+                left join {self.raw}.loan_details l on a.account_id = l.account_id
+                where a.account_type in ('MTG','AUTO','PERS','CC','LOC','HELC')
+                group by 1
+            ),
+            actual as (
+                select delinq_bucket, sum(n_accounts) as n
+                from {self.marts}.mart_delinquency_aging
+                group by 1
+            )
+            select
+                coalesce(e.delinq_bucket, a.delinq_bucket) as delinq_bucket,
+                e.n as expected_n,
+                a.n as actual_n
+            from expected e
+            full outer join actual a on e.delinq_bucket = a.delinq_bucket
+            where e.n is null or a.n is null or e.n <> a.n
+            """
+        )
+        ok = len(mismatches) == 0
+        detail = (
+            "every aging bucket count matches the SAS bands"
+            if ok
+            else "; ".join(
+                f"{m[0]}: expected {m[1]}, actual {m[2]}" for m in mismatches
+            )
+        )
+        self.results.append(
+            CheckResult(
+                "delinquency_bucket_parity",
+                "PASS" if ok else "FAIL",
+                detail,
+                {"mismatches": len(mismatches)},
+            )
+        )
+
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_rwa_completeness()
+        self.check_rwa_control_total()
+        self.check_rwa_risk_weight_parity()
+        self.check_delinquency_completeness()
+        self.check_delinquency_bucket_parity()
         self.con.close()
         return all(r.status != "FAIL" for r in self.results)
 
