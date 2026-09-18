@@ -74,9 +74,12 @@ GOLDEN_TABLE_MAP = {
     "CURATED.TXN_ANOMALIES": ("marts", "mart_transaction_anomalies",
                               "daily_transaction_processing.sas"),
     "CURATED.RISK_SCORES": ("marts", "mart_risk_scores", "credit_risk_scoring.sas"),
-    "REPORTS.MONTHLY_RWA": (None, None, "monthly_regulatory_reporting.sas"),
-    "REPORTS.DELINQUENCY_AGING": (None, None, "monthly_regulatory_reporting.sas"),
-    "REPORTS.LLP_COVERAGE": (None, None, "monthly_regulatory_reporting.sas"),
+    "REPORTS.MONTHLY_RWA": ("marts", "mart_regulatory_rwa",
+                            "monthly_regulatory_reporting.sas"),
+    "REPORTS.DELINQUENCY_AGING": ("marts", "mart_delinquency_aging",
+                                  "monthly_regulatory_reporting.sas"),
+    "REPORTS.LLP_COVERAGE": ("marts", "mart_llp_coverage",
+                             "monthly_regulatory_reporting.sas"),
 }
 
 # SAS control total -> (relation attribute, query template, SAS program).
@@ -103,7 +106,11 @@ GOLDEN_CONTROL_MAP = {
         "select count(*) from {rel}.mart_risk_scores",
         "credit_risk_scoring.sas",
     ),
-    "MONTHLY_RWA.SUM_RWA": (None, None, "monthly_regulatory_reporting.sas"),
+    "MONTHLY_RWA.SUM_RWA": (
+        "marts",
+        "select round(sum(rwa), 2) from {rel}.mart_regulatory_rwa",
+        "monthly_regulatory_reporting.sas",
+    ),
 }
 
 

@@ -123,9 +123,15 @@ models:
           - not_null
 
       - name: risk_weight
-        description: Basel III risk weight (0.00–1.00).
+        description: >
+          Basel III risk weight (0.00–1.00), reproduced value-for-value from the
+          SAS CASE. LOC has its own 1.00 branch in the source (not 0.75 like the
+          other revolving products) and unmapped types such as IRA take the
+          catch-all 1.00.
         data_tests:
           - not_null
+          - accepted_values:
+              values: [0.00, 0.35, 0.50, 0.75, 1.00]
 
       - name: total_exposure
         description: Sum of current_balance for the group.
@@ -242,3 +248,21 @@ models:
                 - Profitable
                 - Marginal
                 - Unprofitable
+
+  - name: mart_llp_coverage
+    description: >
+      Loan loss provision coverage by account type. Migrated from Step 3 of
+      monthly_regulatory_reporting.sas (REPORTS.LLP_COVERAGE).
+    columns:
+      - name: account_type
+        description: Lending account type.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: npl_coverage_pct
+        description: >
+          Total allowance over NPL balance (DAYS_PAST_DUE >= 90), as written in
+          the SAS source; 0 when there is no NPL balance.
+        data_tests:
+          - not_null
