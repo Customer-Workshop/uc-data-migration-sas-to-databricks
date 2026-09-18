@@ -1,13 +1,16 @@
 /*
   stg_daily_transactions.sql
-  Migrated from: Programs/Banking/daily_transaction_processing.sas (Step 1-2)
+  Migrated from: Programs/Banking/daily_transaction_processing.sas (Step 1)
 
   SAS Original:
-    DATA step validation + PROC SQL enrichment join
+    DATA step reading RAW_BANK.TXN_FEED_YYYYMMDD and routing each row to
+    WORK.TXN_VALIDATED or WORK.TXN_REJECTED (first failing rule wins, `return`
+    stops further checks).
 
   dbt Equivalent:
-    Staging model with validation logic expressed as SQL CASE/WHERE
-    replaces the DATA step validation and rejected-record routing
+    One CASE expression evaluated in the same order as the SAS IF chain gives
+    the first failing rule; this model is the TXN_VALIDATED branch (rows with
+    no reject reason) and stg_txn_rejected is the TXN_REJECTED branch.
 */
 
 with source as (
@@ -18,13 +21,16 @@ validated as (
     select
         *,
         case
-            when transaction_id is null then 'Missing TRANSACTION_ID'
-            when account_id is null then 'Missing ACCOUNT_ID'
+            when transaction_id is null or transaction_id = '' then 'Missing TRANSACTION_ID'
+            when account_id is null or account_id = '' then 'Missing ACCOUNT_ID'
             when transaction_amount is null then 'Missing TRANSACTION_AMOUNT'
             when abs(transaction_amount) > 10000000 then 'Amount exceeds threshold'
-            when transaction_type not in ('DEP','WDR','TRF','PMT','FEE','INT','ADJ','REV','CHG','REF')
+            when
+                transaction_type not in ('DEP', 'WDR', 'TRF', 'PMT', 'FEE', 'INT', 'ADJ', 'REV', 'CHG', 'REF')
+                or transaction_type is null
                 then 'Invalid transaction type'
-            when transaction_date > current_date() then 'Future dated'
+            -- SAS: if TRANSACTION_DATE > "&txn_date"d
+            when transaction_date > {{ sas_run_date() }} then 'Future dated'
             else null
         end as rejection_reason
     from source

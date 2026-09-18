@@ -1,0 +1,16 @@
+version: 2
+
+seeds:
+  - name: sas_format_catalog
+    description: >
+      Value maps of the BANKING format catalog (Formats/banking_formats.sas)
+      as a lookup table: one row per (format, code) plus the OTHER= fallback.
+      The format_* macros are the executable form; tests/reconcile_format_mappings.sql
+      proves each macro agrees with this catalog for every row (mapping parity).
+      DELQBKT ranges are recorded as their SAS range labels; the macro
+      format_delinq_bucket implements the ranges.
+    config:
+      column_types:
+        format_name: string
+        code: string
+        label: string

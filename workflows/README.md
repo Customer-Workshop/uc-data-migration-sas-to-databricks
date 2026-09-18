@@ -1,5 +1,16 @@
 # Databricks Workflows — Replacing Control-M Batch Orchestration
 
+> **Deployable definition: the Asset Bundle.** The Banking nightly batch is deployed from
+> the repo root `databricks.yml` + `resources/daily_banking_pipeline.job.yml` (`make deploy`,
+> `make run-job`). The `daily_banking_pipeline.json` in this directory is the original
+> hand-written Jobs-API definition kept for the Control-M → Workflows mapping below; it
+> predates the bundle, still lists insurance programs that have no models yet, and is not
+> deployed. The bundle keeps its DAG (staging → intermediate → marts → test), its 06:00
+> `America/New_York` schedule and `max_concurrent_runs: 1`, and adds a `dbt_seed` task
+> (SAS format catalog + golden outputs) in front and a `parity_report` task
+> (`verify/reconcile.py` → UC volume) at the end. See
+> `docs/BANKING_NIGHTLY_BATCH_MIGRATION_SPEC.md` § Orchestration.
+
 ## Overview
 
 The `daily_banking_pipeline.json` in this directory is a Databricks Workflow definition that replaces the SAS/Control-M batch orchestration previously defined in `ts-sas-legacy-analytics/BatchJobs/run_daily_banking.sas`.

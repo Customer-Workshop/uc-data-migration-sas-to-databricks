@@ -1,0 +1,236 @@
+# SAS golden outputs (business date 31JAN2024) imported by seed/import_sas_golden.py.
+# Provenance: verify/golden/manifest.json (estate commit, runtime, row counts).
+# These are what the legacy programs produced; the parity tests in
+# tests/reconcile_golden_*.sql compare the migrated models against them.
+
+version: 2
+
+seeds:
+  - name: sas_golden_acct_exceptions
+    description: "SAS output for ACCT_EXCEPTIONS — 32 rows."
+    config:
+      column_types:
+        account_id: string
+        customer_id: string
+        account_type: string
+        account_status: string
+        open_date: date
+        close_date: date
+        current_balance: double
+        available_balance: double
+        credit_limit: double
+        interest_rate: double
+        branch_id: string
+        officer_id: string
+        last_activity_date: date
+        first_name: string
+        last_name: string
+        ssn_hash: string
+        date_of_birth: date
+        customer_segment: string
+        risk_rating: double
+        region_code: string
+        primary_email: string
+        phone_number: string
+        acct_age_months: double
+        days_inactive: double
+        utilization_pct: double
+        dormancy_flag: string
+        high_balance_flag: string
+        snapshot_date: date
+        load_timestamp: timestamp
+  - name: sas_golden_capital_adequacy
+    description: "SAS output for CAPITAL_ADEQUACY — 1 rows."
+    config:
+      column_types:
+        report_month: string
+        total_rwa: double
+        cet1_capital: double
+        tier1_capital: double
+        total_capital: double
+        cet1_ratio: double
+        tier1_ratio: double
+        total_capital_ratio: double
+        cet1_status: string
+        tier1_status: string
+        total_capital_status: string
+  - name: sas_golden_cust_accounts_daily
+    description: "SAS output for CUST_ACCOUNTS_DAILY — 466 rows."
+    config:
+      column_types:
+        account_id: string
+        customer_id: string
+        account_type: string
+        account_status: string
+        open_date: date
+        close_date: date
+        current_balance: double
+        available_balance: double
+        credit_limit: double
+        interest_rate: double
+        branch_id: string
+        officer_id: string
+        last_activity_date: date
+        first_name: string
+        last_name: string
+        ssn_hash: string
+        date_of_birth: date
+        customer_segment: string
+        risk_rating: double
+        region_code: string
+        primary_email: string
+        phone_number: string
+        acct_age_months: double
+        days_inactive: double
+        utilization_pct: double
+        dormancy_flag: string
+        high_balance_flag: string
+        snapshot_date: date
+        load_timestamp: timestamp
+  - name: sas_golden_daily_transactions
+    description: "SAS output for DAILY_TRANSACTIONS — 18903 rows."
+    config:
+      column_types:
+        transaction_id: string
+        account_id: string
+        transaction_type: string
+        channel: string
+        merchant_category: string
+        description: string
+        currency_code: string
+        transaction_date: date
+        transaction_amount: double
+        post_date: date
+  - name: sas_golden_delinquency_aging
+    description: "SAS output for DELINQUENCY_AGING — 70 rows."
+    config:
+      column_types:
+        report_month: string
+        account_type: string
+        region_code: string
+        delinq_bucket: string
+        n_accounts: double
+        total_balance: double
+        total_past_due: double
+  - name: sas_golden_llp_coverage
+    description: "SAS output for LLP_COVERAGE — 6 rows."
+    config:
+      column_types:
+        report_month: string
+        account_type: string
+        n_loans: double
+        gross_loans: double
+        total_allowance: double
+        coverage_pct: double
+        npl_balance: double
+        npl_coverage_pct: double
+  - name: sas_golden_monthly_rwa
+    description: "SAS output for MONTHLY_RWA — 59 rows."
+    config:
+      column_types:
+        report_month: string
+        account_type: string
+        customer_segment: string
+        risk_weight: double
+        n_accounts: double
+        total_exposure: double
+        rwa: double
+  - name: sas_golden_risk_migration
+    description: "SAS output for RISK_MIGRATION — 195 rows."
+    config:
+      column_types:
+        score_date: date
+        account_id: string
+        prev_rating: double
+        curr_rating: double
+        migration_direction: string
+        pd: double
+        expected_loss: double
+  - name: sas_golden_risk_scores
+    description: "SAS output for RISK_SCORES — 236 rows."
+    config:
+      column_types:
+        account_id: string
+        customer_id: string
+        account_type: string
+        current_balance: double
+        credit_limit: double
+        acct_age_months: double
+        days_inactive: double
+        utilization_pct: double
+        customer_segment: string
+        region_code: string
+        fico_score: double
+        vantage_score: double
+        bureau_inqs_6mo: double
+        bureau_trades_open: double
+        bureau_derogs: double
+        bureau_util_pct: double
+        bureau_oldest_trade_mo: double
+        pmt_ontime_12mo: double
+        pmt_late_30_12mo: double
+        pmt_late_60_12mo: double
+        pmt_late_90_12mo: double
+        max_days_past_due_ever: double
+        months_since_last_dpd: double
+        avg_pmt_ratio_12mo: double
+        collateral_value: double
+        last_appraisal_date: date
+        ltv: double
+        pd: double
+        lgd: double
+        ead: double
+        expected_loss: double
+        new_risk_rating: double
+        score_date: date
+        model_id: string
+        score_timestamp: timestamp
+  - name: sas_golden_risk_summary
+    description: "SAS output for RISK_SUMMARY — 12 rows."
+    config:
+      column_types:
+        account_type: string
+        new_risk_rating: double
+        n_accounts: double
+        lgd: double
+        ead: double
+        expected_loss: double
+        avg_pd: double
+        avg_lgd: double
+        total_ead: double
+        total_el: double
+  - name: sas_golden_running_balances
+    description: "SAS output for RUNNING_BALANCES — 610 rows."
+    config:
+      column_types:
+        transaction_id: string
+        account_id: string
+        transaction_date: date
+        running_balance: double
+  - name: sas_golden_txn_anomalies
+    description: "SAS output for TXN_ANOMALIES — 46 rows."
+    config:
+      column_types:
+        transaction_id: string
+        account_id: string
+        transaction_type: string
+        channel: string
+        merchant_category: string
+        description: string
+        currency_code: string
+        transaction_date: date
+        transaction_amount: double
+        post_date: date
+        account_type: string
+        customer_id: string
+        customer_segment: string
+        region_code: string
+        branch_id: string
+        pre_txn_balance: double
+        post_txn_balance: double
+        risk_rating: double
+        running_balance: double
+        avg_txn_amt: double
+        std_txn_amt: double
+        z_score: double
+        anomaly_type: string

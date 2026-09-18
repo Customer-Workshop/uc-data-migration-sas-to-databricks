@@ -1,0 +1,14 @@
+{
+  "sas_golden_cust_accounts_daily": 466,
+  "sas_golden_acct_exceptions": 32,
+  "sas_golden_daily_transactions": 18903,
+  "sas_golden_txn_anomalies": 46,
+  "sas_golden_running_balances": 610,
+  "sas_golden_risk_scores": 236,
+  "sas_golden_risk_migration": 195,
+  "sas_golden_risk_summary": 12,
+  "sas_golden_monthly_rwa": 59,
+  "sas_golden_delinquency_aging": 70,
+  "sas_golden_llp_coverage": 6,
+  "sas_golden_capital_adequacy": 1
+}

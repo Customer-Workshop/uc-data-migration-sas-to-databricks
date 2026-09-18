@@ -60,6 +60,41 @@ models:
         data_tests:
           - not_null
 
+      - name: snapshot_date
+        description: SNAPSHOT_DATE = "&run_date"d (var curr_dt).
+        data_tests:
+          - not_null
+
+  - name: int_acct_exceptions
+    description: >
+      STG_BANK.ACCT_EXCEPTIONS — data-quality exceptions raised while
+      building the snapshot (NEG_BAL, HIGH_UTIL, NO_RISK). One row per
+      account per rule met. Migrated from load_customer_accounts.sas Step 2-3.
+    columns:
+      - name: account_id
+        data_tests:
+          - not_null
+      - name: exception_code
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['NEG_BAL', 'HIGH_UTIL', 'NO_RISK']
+
+  - name: int_txn_enriched
+    description: >
+      WORK.TXN_ENRICHED / WORK.TXN_WITH_BALANCE — today's validated feed
+      enriched with the account snapshot, PRE/POST balance and the SAS
+      RETAIN running balance. Migrated from daily_transaction_processing.sas
+      Steps 2-3.
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: account_id
+        data_tests:
+          - not_null
+
   - name: int_claims_adjudication
     description: >
       Claims with fraud screening and auto-adjudication results.

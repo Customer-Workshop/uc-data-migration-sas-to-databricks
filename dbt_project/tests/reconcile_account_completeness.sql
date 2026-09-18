@@ -6,7 +6,7 @@
   WHERE that excluded writeoff/closed accounts. The dbt staging model
   (stg_cust_accounts) reproduces that contract:
       inner join cust_demographics on customer_id
-      where account_status not in ('W','C') and open_date <= current_date()
+      where account_status not in ('W','C') and open_date <= "&run_date"d (var curr_dt)
 
   A naive "raw count == model count" check fails here (and should) because the
   conversion legitimately drops out-of-scope accounts. A meaningful control
@@ -22,7 +22,7 @@ with expected_in_scope as (
     inner join {{ source('banking_raw', 'cust_demographics') }} d
         on a.customer_id = d.customer_id
     where a.account_status not in ('W', 'C')
-      and a.open_date <= current_date()
+      and a.open_date <= {{ sas_run_date() }}
 ),
 
 model_accounts as (

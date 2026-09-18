@@ -1,0 +1,10 @@
+# Volume that receives the parity report the parity_report task writes on every run:
+#   parity_report_<namespace>_<business date>_<utc ts>.md / .json
+resources:
+  volumes:
+    parity_reports:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.reports.name}
+      name: parity_reports
+      volume_type: MANAGED
+      comment: Source→target parity reports written by daily_banking_pipeline / parity_report

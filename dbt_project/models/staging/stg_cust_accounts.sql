@@ -45,8 +45,9 @@ joined as (
     from source a
     inner join demographics d
         on a.customer_id = d.customer_id
+    -- SAS: where a.ACCOUNT_STATUS not in ('W','C') and a.OPEN_DATE <= "&run_date"d
     where a.account_status not in ('W', 'C')
-      and a.open_date <= current_date()
+      and a.open_date <= {{ sas_run_date() }}
 )
 
 select * from joined

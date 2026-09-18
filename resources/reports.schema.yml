@@ -1,0 +1,11 @@
+# `reports` — the SAS `REPORTS` libname (/data/sas/reports) as a UC schema. It holds the
+# parity_reports volume (resources/parity_reports.volume.yml); dbt creates the
+# <namespace>_staging / _intermediate / _marts / _curated / _seeds schemas itself.
+# In development mode the bundle prefixes the name per deployer (dev_<user>_reports), so
+# it is shared by every namespace that user deploys and never collides with anyone else.
+resources:
+  schemas:
+    reports:
+      catalog_name: ${var.catalog}
+      name: reports
+      comment: Banking batch report artifacts (parity reports) written by daily_banking_pipeline

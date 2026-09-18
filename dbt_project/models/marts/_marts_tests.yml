@@ -57,10 +57,15 @@ models:
       Computes PD (Probability of Default), LGD, EAD, and expected loss.
     columns:
       - name: account_id
-        description: Primary key — scored account identifier.
+        description: >
+          Scored account identifier. Unique within one SCORE_DATE (the table
+          is appended nightly like CURATED.RISK_SCORES, so uniqueness is
+          asserted for the batch business date).
         data_tests:
-          - unique
           - not_null
+          - unique:
+              config:
+                where: "score_date = to_date('{{ var('curr_dt') }}')"
 
       - name: pd
         description: >
@@ -69,10 +74,11 @@ models:
         data_tests:
           - not_null
 
-      - name: risk_rating
+      - name: new_risk_rating
         description: >
-          Integer risk rating (1–7) derived from PD thresholds. Replaces
-          the SAS DATA step IF/THEN rating assignment.
+          Integer risk rating (1–7) derived from PD thresholds — SAS column
+          NEW_RISK_RATING in CURATED.RISK_SCORES. Replaces the SAS DATA step
+          IF/THEN rating assignment.
         data_tests:
           - not_null
           - accepted_values:
@@ -107,6 +113,76 @@ models:
                 - LARGE_WITHDRAWAL
                 - ORPHAN_ACCOUNT
 
+  - name: mart_daily_transactions_curated
+    description: >
+      CURATED.DAILY_TRANSACTIONS contract — prior history plus today's
+      validated feed in the ten feed columns (PROC APPEND FORCE drops the
+      enrichment columns). Read next day for the 90-day anomaly statistics.
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: account_id
+        data_tests:
+          - not_null
+      - name: transaction_amount
+        data_tests:
+          - not_null
+
+  - name: mart_running_balances
+    description: >
+      CURATED.RUNNING_BALANCES — ACCOUNT_ID, TRANSACTION_DATE, TRANSACTION_ID,
+      RUNNING_BALANCE for today's validated transactions (DATA step KEEP,
+      table replaced each run).
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: account_id
+        data_tests:
+          - not_null
+
+  - name: mart_risk_migration
+    description: >
+      CURATED.RISK_MIGRATION — accounts whose scorecard rating differs from
+      the demographics RISK_RATING (or had none). Migrated from
+      credit_risk_scoring.sas Step 3.
+    columns:
+      - name: account_id
+        data_tests:
+          - not_null
+          - unique:
+              config:
+                where: "score_date = to_date('{{ var('curr_dt') }}')"
+      - name: curr_rating
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+      - name: migration_direction
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['NEW', 'UPGRADE', 'DOWNGRADE', 'STABLE']
+
+  - name: mart_risk_summary
+    description: >
+      REPORTS.RISK_SUMMARY — PROC MEANS NWAY by ACCOUNT_TYPE, NEW_RISK_RATING.
+      Columns LGD/EAD/EXPECTED_LOSS hold N counts (SAS output-statement
+      naming quirk, see model header).
+    columns:
+      - name: account_type
+        data_tests:
+          - not_null
+      - name: new_risk_rating
+        data_tests:
+          - not_null
+      - name: n_accounts
+        data_tests:
+          - not_null
+
   - name: mart_regulatory_rwa
     description: >
       Monthly Risk-Weighted Assets by account type and segment.
@@ -136,6 +212,37 @@ models:
         description: Risk-weighted assets = exposure × risk_weight.
         data_tests:
           - not_null
+
+      - name: customer_segment
+        data_tests:
+          - not_null
+
+  - name: mart_capital_adequacy
+    description: >
+      REPORTS.CAPITAL_ADEQUACY — one row per report month: TOTAL_RWA,
+      placeholder capital figures, ratios (x100) and PASS/FAIL against the
+      4.5% / 6.0% / 8.0% minimums. Migrated from
+      monthly_regulatory_reporting.sas Step 5.
+    columns:
+      - name: report_month
+        data_tests:
+          - unique
+          - not_null
+      - name: cet1_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['PASS', 'FAIL']
+      - name: tier1_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['PASS', 'FAIL']
+      - name: total_capital_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['PASS', 'FAIL']
 
   - name: mart_delinquency_aging
     description: >
@@ -170,6 +277,43 @@ models:
 
       - name: total_balance
         description: Sum of balances in bucket.
+        data_tests:
+          - not_null
+
+      - name: bucket_sort_order
+        description: >
+          Severity rank used by the SAS ORDER BY (Current=0 ... 180+=6,
+          Unknown=7). Added column; tables have no intrinsic order.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1, 2, 3, 4, 5, 6, 7]
+
+      - name: account_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC']
+
+  - name: mart_llp_coverage
+    description: >
+      REPORTS.LLP_COVERAGE — loan loss provision coverage by ACCOUNT_TYPE
+      (lending products with a LOAN_DETAILS row). Migrated from
+      monthly_regulatory_reporting.sas Step 3.
+    columns:
+      - name: account_type
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC']
+      - name: n_loans
+        data_tests:
+          - not_null
+      - name: coverage_pct
+        data_tests:
+          - not_null
+      - name: npl_coverage_pct
         data_tests:
           - not_null
 

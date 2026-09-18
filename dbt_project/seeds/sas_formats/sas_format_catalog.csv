@@ -1,0 +1,63 @@
+format_name,code,label
+$ACCTTYPE,CHK,Checking
+$ACCTTYPE,SAV,Savings
+$ACCTTYPE,MMA,Money Market
+$ACCTTYPE,CD,Certificate of Deposit
+$ACCTTYPE,IRA,Individual Retirement
+$ACCTTYPE,LOC,Line of Credit
+$ACCTTYPE,MTG,Mortgage
+$ACCTTYPE,AUTO,Auto Loan
+$ACCTTYPE,PERS,Personal Loan
+$ACCTTYPE,CC,Credit Card
+$ACCTTYPE,HELC,Home Equity LOC
+$ACCTTYPE,OTHER,Unknown
+$ACCTSTAT,A,Active
+$ACCTSTAT,C,Closed
+$ACCTSTAT,D,Dormant
+$ACCTSTAT,F,Frozen
+$ACCTSTAT,R,Restricted
+$ACCTSTAT,S,Suspended
+$ACCTSTAT,P,Pending
+$ACCTSTAT,W,Written Off
+$ACCTSTAT,OTHER,Unknown
+RISKRATE,1,Minimal Risk
+RISKRATE,2,Low Risk
+RISKRATE,3,Moderate Risk
+RISKRATE,4,Elevated Risk
+RISKRATE,5,High Risk
+RISKRATE,6,Very High Risk
+RISKRATE,7,Loss Expected
+RISKRATE,OTHER,Not Rated
+$TXNCAT,DEP,Deposit
+$TXNCAT,WDR,Withdrawal
+$TXNCAT,TRF,Transfer
+$TXNCAT,PMT,Payment
+$TXNCAT,FEE,Fee
+$TXNCAT,INT,Interest
+$TXNCAT,ADJ,Adjustment
+$TXNCAT,REV,Reversal
+$TXNCAT,CHG,Charge
+$TXNCAT,REF,Refund
+$TXNCAT,OTHER,Other
+DELQBKT,0,Current
+DELQBKT,1-29,1-29 Days
+DELQBKT,30-59,30-59 Days
+DELQBKT,60-89,60-89 Days
+DELQBKT,90-119,90-119 Days
+DELQBKT,120-179,120-179 Days
+DELQBKT,180-HIGH,180+ Days
+$REGION,NE,Northeast
+$REGION,SE,Southeast
+$REGION,MW,Midwest
+$REGION,SW,Southwest
+$REGION,W,West
+$REGION,NW,Northwest
+$REGION,HQ,Headquarters
+$REGION,OTHER,Unknown
+$CUSTSEG,RET,Retail
+$CUSTSEG,PREM,Premium
+$CUSTSEG,PB,Private Banking
+$CUSTSEG,SMB,Small Business
+$CUSTSEG,COMM,Commercial
+$CUSTSEG,CORP,Corporate
+$CUSTSEG,OTHER,Unclassified

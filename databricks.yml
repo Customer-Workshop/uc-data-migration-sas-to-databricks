@@ -1,0 +1,73 @@
+# Databricks Asset Bundle — Banking nightly batch (SAS → dbt/Databricks)
+#
+# Replaces the Control-M schedule around BatchJobs/run_daily_banking.sas with a
+# version-controlled, scheduled Databricks Workflow. Resources live under
+# resources/<name>.<resource_type>.yml (see resources/daily_banking_pipeline.job.yml).
+#
+#   databricks bundle validate --strict -t dev
+#   make deploy                                      # dev: per-user namespace, schedule paused
+#   make run-job                                     # trigger the deployed job
+#   databricks bundle run daily_banking_pipeline -t dev --params curr_dt=2024-01-31,report_month=202401,golden_parity=true
+#   make deploy-prod                                 # prod: fixed `prod` namespace, schedule live
+#
+# Authentication comes from the Databricks CLI (DATABRICKS_HOST + token/OAuth env vars or
+# a ~/.databrickscfg profile). Nothing secret is stored in this repo; the dbt task uses the
+# token Databricks injects for the job's run-as principal (see dbt_project/profiles.yml).
+bundle:
+  name: sas_banking_nightly_batch
+  # dbt task profiles_directory / project_directory + UC volumes for job artifacts
+  databricks_cli_version: ">= 0.230.0"
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds every schema the batch reads and writes
+    default: banking_analytics
+  namespace:
+    description: >-
+      Output namespace (NS). dbt writes <namespace>_staging / _intermediate / _marts /
+      _curated / _seeds; the parity report lands in <namespace>_reports. Defaults to the
+      deploying user's short name in dev so concurrent deployments never collide.
+    default: ${workspace.current_user.short_name}
+  raw_catalog:
+    description: Catalog of the "before" raw tables (ORA_DW / RAW_BANK / CURATED history)
+    default: banking_analytics
+  raw_schema:
+    description: >-
+      Schema of the raw tables. `raw_sas` holds the deterministic estate seed (business
+      date 31JAN2024) the golden outputs were produced from; the durable `raw` schema is
+      read-only reference data and is never written by this bundle.
+    default: raw_sas
+  warehouse_id:
+    description: SQL warehouse that runs dbt (the dbt task's warehouse, and http_path for the profile)
+    default: 565cd2fd713738c4
+  schedule_timezone:
+    description: Time zone of the nightly schedule (Control-M ran the SAS batch at 06:00 local)
+    default: America/New_York
+  dbt_databricks_version:
+    description: Pinned dbt-databricks adapter for the serverless dbt environment
+    default: "dbt-databricks>=1.9,<2.0"
+
+targets:
+  dev:
+    # Development mode: resources are prefixed "[dev <user>]", the schedule is paused,
+    # and the volume/schema names get the same prefix — so `make deploy` from two laptops
+    # deploys two independent copies of the batch.
+    # The workspace host comes from the CLI's authentication (DATABRICKS_HOST or a
+    # profile); pin it here with `workspace: { host: https://... }` per environment.
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      # One copy per deploying principal. Production deployments should come from CI as a
+      # service principal; when a person deploys instead, production mode also requires
+      #   run_as:
+      #     service_principal_name: <application-id>
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      namespace: prod
+      raw_schema: raw

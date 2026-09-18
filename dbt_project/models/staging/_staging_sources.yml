@@ -5,30 +5,46 @@ sources:
     description: >
       Raw banking data. In the SAS environment these were accessed via
       LIBNAME ORA_DW (Oracle) and RAW_BANK (file-based).
-      In Databricks, these are external tables in Unity Catalog.
-    database: banking_analytics
-    schema: raw
+      In Databricks, these are Unity Catalog tables. The location is
+      parameterised so the same models can run against the durable SAS-shaped
+      landing schema (`raw_sas`, loaded from the estate's CSV extracts by
+      seed/load_sas_estate.py), a per-namespace copy, or production feeds.
+    database: "{{ var('raw_catalog', env_var('DBT_RAW_CATALOG', 'banking_analytics')) }}"
+    schema: "{{ var('raw_schema', env_var('DBT_RAW_SCHEMA', 'raw_sas')) }}"
     tables:
       - name: cust_accounts
         description: "Customer account master (SAS: ORA_DW.CUST_ACCOUNTS)"
       - name: cust_demographics
         description: "Customer demographics (SAS: ORA_DW.CUST_DEMOGRAPHICS)"
       - name: daily_transactions
-        description: "Daily transaction feed (SAS: RAW_BANK.TXN_FEED_YYYYMMDD)"
+        description: >
+          Daily transaction feed for the business date
+          (SAS: RAW_BANK.TXN_FEED_YYYYMMDD, one dataset per day).
+      - name: curated_daily_transactions_history
+        description: >
+          Prior content of the curated transaction table before the nightly
+          append (SAS: CURATED.DAILY_TRANSACTIONS). Read for the 90-day
+          anomaly statistics and carried forward into
+          mart_daily_transactions_curated.
       - name: loan_details
         description: "Loan detail records (SAS: ORA_DW.LOAN_DETAILS)"
       - name: bureau_scores
-        description: "Credit bureau scores (SAS: ORA_DW.BUREAU_SCORES)"
+        description: "Credit bureau scores, one row per customer per score_date (SAS: ORA_DW.BUREAU_SCORES)"
       - name: payment_history
         description: "Payment history (SAS: ORA_DW.PAYMENT_HISTORY)"
       - name: collateral
         description: "Collateral records (SAS: ORA_DW.COLLATERAL)"
+      - name: daily_rates
+        description: >
+          Daily reference rates (SAS: RAW_BANK.DAILY_RATES). Declared as an
+          input of load_customer_accounts.sas but never read by the program;
+          kept for lineage completeness.
 
   - name: insurance_raw
     description: >
       Raw insurance data. In SAS accessed via RAW_INS and TERA_DW (Teradata).
-    database: banking_analytics
-    schema: raw
+    database: "{{ var('raw_catalog', env_var('DBT_RAW_CATALOG', 'banking_analytics')) }}"
+    schema: "{{ env_var('DBT_INSURANCE_RAW_SCHEMA', 'raw') }}"
     tables:
       - name: policies
         description: "Policy master (SAS: RAW_INS.POLICIES)"

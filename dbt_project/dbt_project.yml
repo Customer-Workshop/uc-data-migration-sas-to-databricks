@@ -19,9 +19,20 @@ clean-targets:
 vars:
   # SAS macro variable equivalents (from autoexec.sas)
   environment: "{{ env_var('DBT_ENVIRONMENT', 'dev') }}"
+  # &CURR_DT — the batch business date (run_date / txn_date / score_date).
+  # Override to replay a fixed date: --vars '{curr_dt: "2024-01-31"}'
   curr_dt: "{{ run_started_at.strftime('%Y-%m-%d') }}"
-  prev_ym: "{{ (run_started_at.replace(day=1) - modules.datetime.timedelta(days=1)).strftime('%Y%m') }}"
+  # &PREV_YM — report_month for monthly_regulatory_reporting defaults to the
+  # month before curr_dt (macros/sas_batch_dates.sql). Override with
+  # --vars '{report_month: "202401"}'
+  report_month: ""
   max_obs_warn: 10000000
+  # &model_id in credit_risk_scoring.sas
+  model_id: "CRM-2023-Q4-v2"
+  # Enable the row-level parity tests against the SAS golden seeds
+  # (tests/reconcile_golden_*.sql). Only meaningful when the batch is replayed
+  # for the golden business date: curr_dt=2024-01-31, report_month=202401.
+  sas_golden_parity: false
 
 models:
   sas_to_databricks_migration:
@@ -41,3 +52,11 @@ models:
 seeds:
   sas_to_databricks_migration:
     +schema: seeds
+    sas_golden:
+      # Golden outputs of the legacy estate for business date 31JAN2024
+      # (see seeds/sas_golden/_sas_golden.yml and verify/golden/manifest.json).
+      +tags: ['sas_golden']
+
+tests:
+  sas_to_databricks_migration:
+    +tags: ['reconcile']

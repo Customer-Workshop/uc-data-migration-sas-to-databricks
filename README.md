@@ -50,13 +50,18 @@ The full convention — and a playbook for authoring new demos this way — live
 
 | SAS Source Program | dbt Model(s) | Migration Pattern |
 |---|---|---|
-| `load_customer_accounts.sas` | `stg_cust_accounts` → `int_account_metrics` | PROC SQL + DATA step → SQL + CASE |
-| `daily_transaction_processing.sas` | `stg_daily_transactions` → `mart_daily_transactions` | RETAIN → window function |
-| `credit_risk_scoring.sas` | `mart_risk_scores` | WOE scorecard → nested CASE + exp() |
-| `monthly_regulatory_reporting.sas` | (planned) `mart_regulatory_rwa` + `mart_delinquency_aging` | PROC SQL aggregation → SQL GROUP BY |
+| `load_customer_accounts.sas` | `stg_cust_accounts` → `int_account_metrics`, `int_acct_exceptions` | PROC SQL + DATA step → SQL + CASE; multi-`output` → UNION ALL |
+| `daily_transaction_processing.sas` | `stg_daily_transactions`, `stg_txn_rejected` → `int_txn_enriched` → `mart_daily_transactions`, `mart_daily_transactions_curated`, `mart_transaction_anomalies`, `mart_running_balances` | RETAIN → window function; PROC APPEND → incremental merge |
+| `credit_risk_scoring.sas` | `mart_risk_scores`, `mart_risk_migration`, `mart_risk_summary` | WOE scorecard → nested CASE + exp(); PROC MEANS → GROUP BY |
+| `monthly_regulatory_reporting.sas` | `stg_loan_details` → `mart_regulatory_rwa`, `mart_delinquency_aging`, `mart_llp_coverage`, `mart_capital_adequacy` | PROC SQL aggregation → SQL GROUP BY |
 | `claims_processing.sas` | (planned) `stg_claims` → `int_claims_adjudication` | Hash lookup → broadcast join |
 | `policy_valuation.sas` | (planned) `int_policy_valuation` → `mart_loss_ratios` | MERGE BY → SQL JOIN |
 | `customer_profitability.sas` | (planned) `mart_customer_pnl` | Multi-source merge → multi-ref JOIN |
+
+The Banking nightly batch (all four programs above) is specified end to end in
+[`docs/BANKING_NIGHTLY_BATCH_MIGRATION_SPEC.md`](docs/BANKING_NIGHTLY_BATCH_MIGRATION_SPEC.md)
+and deployed as the scheduled `daily_banking_pipeline` Workflow from the Asset Bundle
+(`databricks.yml`, `resources/`).
 
 See [`docs/SAS_TO_DBT_MIGRATION_MAP.md`](docs/SAS_TO_DBT_MIGRATION_MAP.md) for the complete construct-level mapping (LIBNAME → Unity Catalog, PROC FORMAT → dbt macros, RETAIN → window functions, hash objects → broadcast joins, etc.).
 

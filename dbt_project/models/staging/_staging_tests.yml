@@ -122,6 +122,25 @@ models:
         data_tests:
           - not_null
 
+  - name: stg_txn_rejected
+    description: >
+      WORK.TXN_REJECTED — feed rows failing the validation rules of
+      daily_transaction_processing.sas Step 1, with the SAS REJECT_REASON text.
+    columns:
+      - name: reject_reason
+        data_tests:
+          - not_null
+
+  - name: stg_loan_details
+    description: >
+      ORA_DW.LOAN_DETAILS pass-through (LTV, DAYS_PAST_DUE, PAST_DUE_AMOUNT,
+      ALLOWANCE_AMT) used by monthly_regulatory_reporting.sas.
+    columns:
+      - name: account_id
+        data_tests:
+          - unique
+          - not_null
+
   - name: stg_claims
     description: >
       Validated insurance claims with policy enrichment.

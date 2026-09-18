@@ -1,24 +1,30 @@
 # Databricks connection profile
 # In production, use environment variables for credentials
+#
+# Two ways to run:
+#   * locally / CI — DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN (+ DBT_SCHEMA)
+#   * inside the Asset Bundle job (resources/daily_banking_pipeline.job.yml) — the dbt
+#     task injects DBT_HOST / DBT_ACCESS_TOKEN for the job's run-as principal and the
+#     bundle passes catalog / namespace / warehouse_id as dbt vars. No token is stored.
 databricks:
   target: dev
   outputs:
     dev:
       type: databricks
-      catalog: banking_analytics
+      catalog: "{{ var('catalog', 'banking_analytics') }}"
       # Namespace prefix for outputs. Override per run/attendee for isolated,
       # concurrent demo spaces, e.g. DBT_SCHEMA=alice -> alice_staging/_marts/...
-      schema: "{{ env_var('DBT_SCHEMA', 'dev') }}"
-      host: "{{ env_var('DATABRICKS_HOST') }}"
-      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
-      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      schema: "{{ var('namespace', env_var('DBT_SCHEMA', 'dev')) }}"
+      host: "{{ env_var('DATABRICKS_HOST', env_var('DBT_HOST', '')) | replace('https://', '') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH', '/sql/1.0/warehouses/' ~ var('warehouse_id', '')) }}"
+      token: "{{ env_var('DATABRICKS_TOKEN', env_var('DBT_ACCESS_TOKEN', '')) }}"
       threads: 4
 
     prod:
       type: databricks
-      catalog: banking_analytics
-      schema: prod
-      host: "{{ env_var('DATABRICKS_HOST') }}"
-      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
-      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: "{{ var('catalog', 'banking_analytics') }}"
+      schema: "{{ var('namespace', 'prod') }}"
+      host: "{{ env_var('DATABRICKS_HOST', env_var('DBT_HOST', '')) | replace('https://', '') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH', '/sql/1.0/warehouses/' ~ var('warehouse_id', '')) }}"
+      token: "{{ env_var('DATABRICKS_TOKEN', env_var('DBT_ACCESS_TOKEN', '')) }}"
       threads: 8

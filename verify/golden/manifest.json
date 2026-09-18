@@ -1,0 +1,19 @@
+{
+  "estate": "ts-sas-legacy-analytics",
+  "estate_commit": "ef511409f2bd93ff6304084edef8cc064ad7dad5",
+  "runtime": "opensas (container)",
+  "business_date": "31JAN2024",
+  "started_utc": "2026-09-18T19:12:03Z",
+  "finished_utc": "2026-09-18T19:12:04Z",
+  "warnings": 10,
+  "row_counts": {
+    "STG_BANK.CUST_ACCOUNTS_DAILY": 466,
+    "STG_BANK.ACCT_EXCEPTIONS": 32,
+    "CURATED.DAILY_TRANSACTIONS": 18903,
+    "CURATED.TXN_ANOMALIES": 46,
+    "CURATED.RISK_SCORES": 236,
+    "REPORTS.MONTHLY_RWA": 59,
+    "REPORTS.DELINQUENCY_AGING": 70,
+    "REPORTS.LLP_COVERAGE": 6
+  }
+}

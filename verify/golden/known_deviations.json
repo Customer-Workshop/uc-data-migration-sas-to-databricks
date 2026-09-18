@@ -1,0 +1,16 @@
+{
+  "description": "Places where the golden outputs (OpenSAS container, see manifest.json) are known to differ from SAS 9.4 semantics. Parity controls accept the SAS-semantics value on exactly these cells and report the exception; everything else is compared as-is.",
+  "deviations": [
+    {
+      "id": "KD-001",
+      "table": "REPORTS.LLP_COVERAGE",
+      "column": "NPL_COVERAGE_PCT",
+      "program": "Programs/Banking/monthly_regulatory_reporting.sas",
+      "sas_expression": "case when calculated NPL_BALANCE > 0 then sum(l.ALLOWANCE_AMT) / calculated NPL_BALANCE * 100 else 0 end",
+      "golden_behaviour": "0 on every row, including CC (NPL_BALANCE 5195.86) and MTG (NPL_BALANCE 1176940.10) for 202401.",
+      "expected_sas_behaviour": "TOTAL_ALLOWANCE / NPL_BALANCE * 100 when NPL_BALANCE > 0 (CALCULATED may reference a summary-function alias in the same SELECT).",
+      "migration_decision": "Model implements the SAS 9.4 formula. Golden parity accepts the model value on rows where the golden is 0 and NPL_BALANCE > 0 only if it equals TOTAL_ALLOWANCE / NPL_BALANCE * 100 computed from the golden's own figures.",
+      "how_to_close": "Re-run the estate on SAS 9.4 (or an OpenSAS build that folds CALCULATED aggregate aliases in CASE) and re-import the golden; the exception then never triggers."
+    }
+  ]
+}

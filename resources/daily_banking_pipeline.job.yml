@@ -1,0 +1,198 @@
+# daily_banking_pipeline — the Banking nightly batch as one scheduled Workflow.
+#
+# SAS/Control-M (ts-sas-legacy-analytics/BatchJobs/run_daily_banking.sas):
+#   06:00 trigger → %run_step(1) load_customer_accounts.sas
+#                 → %run_step(2) daily_transaction_processing.sas
+#                 → %run_step(3) credit_risk_scoring.sas
+#                 → monthly_regulatory_reporting.sas (month-end, &PREV_YM)
+#                 → %check_step_status / sendmail
+#
+# Databricks:
+#   dbt_seed → dbt_staging → dbt_intermediate → dbt_marts → dbt_test → parity_report
+#
+# The four programs are not four tasks: dbt already orders every model by ref(), so the
+# DAG is cut by layer (the same cut workflows/daily_banking_pipeline.json used) and the
+# regulatory marts run with the daily batch — for the current business date they are
+# just empty for a month that has not closed, exactly like a SAS re-run mid-month.
+#
+# Job parameters (override on `bundle run --params k=v,...` or in the UI):
+#   curr_dt        &CURR_DT — business date, default = the run date (like today() in SAS)
+#   report_month   &report_month — blank = &PREV_YM (month before curr_dt)
+#   golden_parity  "true" enables the row-level tests against the SAS golden seeds; only
+#                  meaningful for the golden replay curr_dt=2024-01-31 report_month=202401
+#
+# Every dbt command shares one --vars payload so the profile (catalog / namespace /
+# warehouse), the source location (raw_catalog / raw_schema) and the batch dates are set
+# exactly once, here.
+variables:
+  dbt_vars:
+    description: dbt --vars payload shared by every dbt task (YAML flow mapping)
+    default: >-
+      {curr_dt: "{{job.parameters.curr_dt}}",
+      report_month: "{{job.parameters.report_month}}",
+      sas_golden_parity: "{{job.parameters.golden_parity}}",
+      catalog: "${var.catalog}",
+      namespace: "${var.namespace}",
+      warehouse_id: "${var.warehouse_id}",
+      raw_catalog: "${var.raw_catalog}",
+      raw_schema: "${var.raw_schema}"}
+  parity_report_dir:
+    description: UC volume path that receives the parity report artifacts
+    default: ${resources.volumes.parity_reports.volume_path}
+
+resources:
+  jobs:
+    daily_banking_pipeline:
+      name: daily_banking_pipeline
+      description: >-
+        Banking nightly batch (SAS → dbt/Databricks). Replaces the Control-M schedule around
+        run_daily_banking.sas: load_customer_accounts, daily_transaction_processing,
+        credit_risk_scoring and monthly_regulatory_reporting, then the reconciliation
+        controls and the parity report. Outputs land in ${var.catalog}.${var.namespace}_*.
+      tags:
+        team: data-engineering
+        domain: banking-analytics
+        migration_source: sas-control-m
+
+      schedule:
+        # Control-M fired the SAS batch at 06:00 every day. Development mode pauses this.
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: ${var.schedule_timezone}
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      timeout_seconds: 14400
+
+      parameters:
+        - name: curr_dt
+          default: "{{job.start_time.iso_date}}"
+        - name: report_month
+          default: ""
+        - name: golden_parity
+          default: "false"
+
+      environments:
+        - environment_key: dbt
+          spec:
+            environment_version: "4"
+            dependencies:
+              - ${var.dbt_databricks_version}
+        - environment_key: python
+          spec:
+            environment_version: "4"
+
+      tasks:
+        - task_key: dbt_seed
+          description: >-
+            Load the SAS format catalog ($ACCTTYPE, $ACCTSTAT, RISKRATE, ...) and the OpenSAS
+            golden outputs (business date 31JAN2024) as dbt seeds.
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt_project
+            profiles_directory: ../dbt_project
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - dbt seed --target ${bundle.target} --full-refresh --vars '${var.dbt_vars}'
+          timeout_seconds: 1800
+          max_retries: 1
+
+        - task_key: dbt_staging
+          description: >-
+            SAS step 1 inputs — ORA_DW / RAW_BANK reads, the TXN_FEED validation split
+            (STG_BANK.CUST_ACCOUNTS_DAILY inputs, TXN_VALID / TXN_REJECTED).
+          depends_on:
+            - task_key: dbt_seed
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt_project
+            profiles_directory: ../dbt_project
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - dbt run --target ${bundle.target} --select tag:staging --vars '${var.dbt_vars}'
+          timeout_seconds: 3600
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_intermediate
+          description: >-
+            SAS DATA-step derivations — account metrics (ACCT_AGE_MONTHS, UTILIZATION_PCT,
+            DORMANCY_FLAG), ACCT_EXCEPTIONS branches, enriched transactions with running balances.
+          depends_on:
+            - task_key: dbt_staging
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt_project
+            profiles_directory: ../dbt_project
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - dbt run --target ${bundle.target} --select tag:intermediate --vars '${var.dbt_vars}'
+          timeout_seconds: 3600
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_marts
+          description: >-
+            CURATED / REPORTS outputs — DAILY_TRANSACTIONS, TXN_ANOMALIES, RUNNING_BALANCES,
+            RISK_SCORES, RISK_MIGRATION, RISK_SUMMARY, MONTHLY_RWA, CAPITAL_ADEQUACY,
+            DELINQUENCY_AGING, LLP_COVERAGE.
+          depends_on:
+            - task_key: dbt_intermediate
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt_project
+            profiles_directory: ../dbt_project
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - dbt run --target ${bundle.target} --select tag:marts --vars '${var.dbt_vars}'
+          timeout_seconds: 7200
+          max_retries: 1
+          retry_on_timeout: true
+
+        - task_key: dbt_test
+          description: >-
+            Schema tests plus the reconciliation controls (dbt_project/tests/reconcile_*.sql):
+            completeness, control totals, CASE-branch mapping parity, running-balance chain,
+            anomaly precedence, risk bands, regulatory controls, and — when golden_parity=true —
+            row-level parity with the SAS golden outputs. A failure here fails the batch.
+          depends_on:
+            - task_key: dbt_marts
+          environment_key: dbt
+          dbt_task:
+            project_directory: ../dbt_project
+            profiles_directory: ../dbt_project
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - dbt test --target ${bundle.target} --vars '${var.dbt_vars}'
+          timeout_seconds: 1800
+          max_retries: 0
+
+        - task_key: parity_report
+          description: >-
+            verify/reconcile.py — the human-facing source→target reconciliation report
+            (pass/fail per control, diffs, OpenSAS provenance, known deviations). Written to
+            ${var.parity_report_dir}; exits non-zero on any failed control.
+          depends_on:
+            - task_key: dbt_test
+          environment_key: python
+          spark_python_task:
+            python_file: ../verify/reconcile.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --namespace
+              - ${var.namespace}
+              - --raw-catalog
+              - ${var.raw_catalog}
+              - --raw-schema
+              - ${var.raw_schema}
+              - --business-date
+              - "{{job.parameters.curr_dt}}"
+              - --report-month
+              - "{{job.parameters.report_month}}"
+              - --golden
+              - "{{job.parameters.golden_parity}}"
+              - --report-dir
+              - ${var.parity_report_dir}
+          timeout_seconds: 1800
+          max_retries: 0
