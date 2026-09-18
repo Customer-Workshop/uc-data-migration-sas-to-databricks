@@ -17,6 +17,11 @@ sources:
         description: "Customer demographics (SAS: ORA_DW.CUST_DEMOGRAPHICS)"
       - name: daily_transactions
         description: "Daily transaction feed (SAS: RAW_BANK.TXN_FEED_YYYYMMDD)"
+      - name: curated_daily_transactions_history
+        description: >
+          Curated transaction history as it stood before the run date, i.e.
+          CURATED.DAILY_TRANSACTIONS prior to the day's PROC APPEND. Only
+          present in the SAS extract (RAW_SCHEMA=raw_sas).
       - name: loan_details
         description: "Loan detail records (SAS: ORA_DW.LOAN_DETAILS)"
       - name: bureau_scores

@@ -18,11 +18,12 @@ validated as (
     select
         *,
         case
-            when transaction_id is null then 'Missing TRANSACTION_ID'
-            when account_id is null then 'Missing ACCOUNT_ID'
+            when transaction_id is null or trim(transaction_id) = '' then 'Missing TRANSACTION_ID'
+            when account_id is null or trim(account_id) = '' then 'Missing ACCOUNT_ID'
             when transaction_amount is null then 'Missing TRANSACTION_AMOUNT'
             when abs(transaction_amount) > 10000000 then 'Amount exceeds threshold'
-            when transaction_type not in ('DEP','WDR','TRF','PMT','FEE','INT','ADJ','REV','CHG','REF')
+            when transaction_type is null
+                 or transaction_type not in ('DEP','WDR','TRF','PMT','FEE','INT','ADJ','REV','CHG','REF')
                 then 'Invalid transaction type'
             when transaction_date > {{ sas_run_date() }} then 'Future dated'
             else null

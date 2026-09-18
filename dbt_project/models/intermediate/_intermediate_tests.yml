@@ -135,3 +135,31 @@ models:
         data_tests:
           - accepted_values:
               values: ['Y', 'N']
+
+  - name: int_txn_enriched
+    description: >
+      The run date's validated transactions joined to account master data,
+      with post-transaction and cumulative running balances. Equivalent to
+      WORK.TXN_WITH_BALANCE in daily_transaction_processing.sas (Steps 2-3).
+      running_balance is deliberately left nullable: SAS produces a missing
+      balance for a transaction whose account has no master record.
+    columns:
+      - name: transaction_id
+        description: Primary key — unique transaction identifier.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        data_tests:
+          - not_null
+
+      - name: transaction_date
+        data_tests:
+          - not_null
+
+      - name: transaction_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [DEP, WDR, TRF, PMT, FEE, INT, ADJ, REV, CHG, REF]

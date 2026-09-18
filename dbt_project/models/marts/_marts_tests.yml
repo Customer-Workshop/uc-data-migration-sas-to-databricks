@@ -5,10 +5,10 @@ version: 2
 models:
   - name: mart_daily_transactions
     description: >
-      Enriched transaction records with running balances and pre/post
-      transaction balances. Replaces PROC SQL enrichment join + DATA step
-      RETAIN running balance from daily_transaction_processing.sas.
-      Materialized as an incremental model (replaces PROC APPEND).
+      Curated transaction history plus the run date's validated batch.
+      Replaces the PROC APPEND in daily_transaction_processing.sas (Step 5),
+      which keeps only the base table's columns — the enrichment columns live
+      on int_txn_enriched.
     columns:
       - name: transaction_id
         description: Primary key — unique transaction identifier.
@@ -43,10 +43,23 @@ models:
                 - CHG
                 - REF
 
-      - name: running_balance
-        description: >
-          Cumulative balance after this transaction. Computed via SQL
-          window function, replacing SAS RETAIN + BY-group logic.
+      - name: transaction_amount
+        description: Signed transaction amount.
+        data_tests:
+          - not_null
+
+  - name: mart_running_balances
+    description: >
+      Running balance per transaction for the run date's batch. Replaces
+      CURATED.RUNNING_BALANCES from daily_transaction_processing.sas (Step 6).
+    columns:
+      - name: transaction_id
+        description: Primary key — transaction the balance applies to.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
         data_tests:
           - not_null
 
