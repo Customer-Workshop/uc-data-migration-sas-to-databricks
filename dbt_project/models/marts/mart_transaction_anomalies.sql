@@ -23,7 +23,7 @@ account_stats as (
         stddev(abs(transaction_amount)) as std_txn_amt,
         count(*) as txn_count
     from {{ ref('mart_daily_transactions') }}
-    where transaction_date >= date_add(current_date(), -90)
+    where transaction_date >= date_add({{ sas_run_date() }}, -90)
     group by account_id
 ),
 

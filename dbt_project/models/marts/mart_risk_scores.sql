@@ -13,7 +13,22 @@
     business logic maps to a SQL model with nested CASE expressions
 */
 
-with score_input as (
+-- SAS joins ORA_DW.BUREAU_SCORES on the customer's most recent SCORE_DATE at
+-- or before &score_date; the table holds one row per customer per bureau pull.
+with latest_bureau_scores as (
+    select * from (
+        select
+            *,
+            row_number() over (
+                partition by customer_id order by score_date desc
+            ) as score_recency
+        from {{ source('banking_raw', 'bureau_scores') }}
+        where score_date <= {{ sas_run_date() }}
+    )
+    where score_recency = 1
+),
+
+score_input as (
     select
         a.account_id,
         a.customer_id,
@@ -37,7 +52,7 @@ with score_input as (
             else null
         end as ltv
     from {{ ref('int_account_metrics') }} a
-    left join {{ source('banking_raw', 'bureau_scores') }} b
+    left join latest_bureau_scores b
         on a.customer_id = b.customer_id
     left join {{ source('banking_raw', 'payment_history') }} p
         on a.account_id = p.account_id
@@ -170,7 +185,7 @@ select
         else 7
     end as risk_rating,
 
-    current_date() as score_date,
+    {{ sas_run_date() }} as score_date,
     'CRM-2023-Q4-v2' as model_id,
     current_timestamp() as score_timestamp
 

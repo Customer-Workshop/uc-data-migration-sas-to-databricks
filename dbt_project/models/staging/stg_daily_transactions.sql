@@ -24,7 +24,7 @@ validated as (
             when abs(transaction_amount) > 10000000 then 'Amount exceeds threshold'
             when transaction_type not in ('DEP','WDR','TRF','PMT','FEE','INT','ADJ','REV','CHG','REF')
                 then 'Invalid transaction type'
-            when transaction_date > current_date() then 'Future dated'
+            when transaction_date > {{ sas_run_date() }} then 'Future dated'
             else null
         end as rejection_reason
     from source

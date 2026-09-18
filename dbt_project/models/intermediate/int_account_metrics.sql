@@ -21,10 +21,10 @@ enriched as (
         *,
 
         -- SAS: ACCT_AGE_MONTHS = intck('month', OPEN_DATE, "&run_date"d)
-        months_between(current_date(), open_date) as acct_age_months,
+        months_between({{ sas_run_date() }}, open_date) as acct_age_months,
 
         -- SAS: DAYS_INACTIVE = "&run_date"d - LAST_ACTIVITY_DATE
-        datediff(current_date(), last_activity_date) as days_inactive,
+        datediff({{ sas_run_date() }}, last_activity_date) as days_inactive,
 
         -- SAS: UTILIZATION_PCT (revolving accounts only)
         case
@@ -35,7 +35,7 @@ enriched as (
 
         -- SAS: DORMANCY_FLAG
         case
-            when datediff(current_date(), last_activity_date) > 365
+            when datediff({{ sas_run_date() }}, last_activity_date) > 365
                  and account_status = 'A'
             then 'Y' else 'N'
         end as dormancy_flag,
@@ -50,7 +50,7 @@ enriched as (
         {{ format_account_status('account_status') }} as account_status_desc,
         {{ format_customer_segment('customer_segment') }} as customer_segment_desc,
 
-        current_date() as snapshot_date,
+        {{ sas_run_date() }} as snapshot_date,
         current_timestamp() as load_timestamp
 
     from accounts

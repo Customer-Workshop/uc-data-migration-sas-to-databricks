@@ -6,8 +6,10 @@ sources:
       Raw banking data. In the SAS environment these were accessed via
       LIBNAME ORA_DW (Oracle) and RAW_BANK (file-based).
       In Databricks, these are external tables in Unity Catalog.
+      RAW_SCHEMA selects which source extract is read: `raw` (synthetic seed)
+      or `raw_sas` (the legacy estate's own input CSVs).
     database: banking_analytics
-    schema: raw
+    schema: "{{ env_var('RAW_SCHEMA', 'raw') }}"
     tables:
       - name: cust_accounts
         description: "Customer account master (SAS: ORA_DW.CUST_ACCOUNTS)"

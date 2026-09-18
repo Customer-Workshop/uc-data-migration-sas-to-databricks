@@ -3,6 +3,9 @@ target/
 dbt_packages/
 logs/
 
+# Local workspace connection settings
+.env
+
 # Python
 __pycache__/
 *.pyc
