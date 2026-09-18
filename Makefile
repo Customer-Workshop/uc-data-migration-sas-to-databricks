@@ -5,11 +5,27 @@
 # interactively or scheduled via Control-M. This Makefile provides
 # a standardized developer workflow.
 
-.PHONY: install lint lint-fix compile parse test reconcile run run-staging run-intermediate run-marts ci clean help \
+.PHONY: install lint lint-fix compile parse test reconcile reconcile-test run run-staging run-intermediate run-marts ci clean help \
         seed teardown build demo-up demo-down deploy deploy-prod run-job destroy
 
 DBT_DIR := dbt_project
 SQLFLUFF_CONFIG := .sqlfluff
+
+# Migration-lifecycle knobs (all overridable: `make demo-up NS=alice SEED=sas`)
+NS ?= dev
+# SEED=synthetic -> Faker data (seed/generate_and_load.py)
+# SEED=sas       -> the SAS estate's own Data/csv extracts, i.e. the exact
+#                   "before" data the Dockerised SAS run produced its golden outputs from
+SEED ?= sas
+SAS_ESTATE ?= ../ts-sas-legacy-analytics
+# Schema holding the durable "before" tables the models read. Point it at a
+# fresh schema (e.g. raw_sas) to load the SAS extracts without touching `raw`.
+RAW_SCHEMA ?= raw
+export DBT_RAW_SCHEMA := $(RAW_SCHEMA)
+# Golden outputs exported by the SAS container (docker/README.md in the estate).
+# Set to add SAS-vs-target parity controls to `make reconcile`.
+SAS_GOLDEN ?=
+RECONCILE_FLAGS := --namespace $(NS)$(if $(SAS_GOLDEN), --sas-golden $(SAS_GOLDEN),)
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -35,8 +51,11 @@ parse: ## Parse/validate dbt project (no connection required)
 test: ## Run dbt schema tests (requires Databricks connection)
 	cd $(DBT_DIR) && dbt test --target dev
 
-reconcile: ## Source→target reconciliation report for namespace NS (requires Databricks connection)
-	python verify/reconcile.py --namespace $(NS)
+reconcile: ## Reconciliation report for namespace NS; add SAS_GOLDEN=<dir> for SAS parity controls
+	python verify/reconcile.py $(RECONCILE_FLAGS) --raw-schema $(RAW_SCHEMA) --report reconciliation_$(NS).md
+
+reconcile-test: ## Fixture tests for the reconciliation harness (no Databricks connection)
+	python -m unittest verify/test_reconcile.py
 
 run-staging: ## Run staging models only
 	cd $(DBT_DIR) && dbt run --select tag:staging
@@ -72,8 +91,12 @@ clean: ## Remove dbt build artifacts
 NS ?= dev
 TARGET ?= dev
 
-seed: ## Seed synthetic "before" raw data into banking_analytics.raw (idempotent)
+seed: ## Seed the "before" raw data (SEED=sas from $(SAS_ESTATE)/Data/csv, or SEED=synthetic)
+ifeq ($(SEED),sas)
+	python seed/load_sas_estate.py --estate $(SAS_ESTATE) --schema $(RAW_SCHEMA)
+else
 	python seed/generate_and_load.py
+endif
 
 teardown: ## Drop one namespace's output schemas (NS=...); raw data untouched
 	python seed/teardown.py --namespace $(NS)

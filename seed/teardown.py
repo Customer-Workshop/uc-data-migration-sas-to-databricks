@@ -36,7 +36,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--namespace", required=True,
                     help="Schema prefix used for the run (e.g. dev, alice, run2)")
-    ap.add_argument("--catalog", default="banking_analytics")
+    ap.add_argument("--catalog", default=os.environ.get("DATABRICKS_CATALOG", "banking_analytics"),
+                    help="Unity Catalog catalog (default: $DATABRICKS_CATALOG or banking_analytics)")
     args = ap.parse_args()
 
     host = os.environ["DATABRICKS_HOST"].replace("https://", "").rstrip("/")

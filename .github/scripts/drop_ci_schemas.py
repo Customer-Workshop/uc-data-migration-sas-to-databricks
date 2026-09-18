@@ -20,7 +20,7 @@ from databricks import sql
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", required=True, help="Per-run schema prefix, e.g. ci_123_1")
-    ap.add_argument("--catalog", default="banking_analytics")
+    ap.add_argument("--catalog", default=os.environ.get("DATABRICKS_CATALOG", "banking_analytics"))
     args = ap.parse_args()
 
     for var in ("DATABRICKS_HOST", "DATABRICKS_HTTP_PATH", "DATABRICKS_TOKEN"):

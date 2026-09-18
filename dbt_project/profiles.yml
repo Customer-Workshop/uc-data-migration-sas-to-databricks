@@ -5,7 +5,7 @@ databricks:
   outputs:
     dev:
       type: databricks
-      catalog: banking_analytics
+      catalog: "{{ env_var('DATABRICKS_CATALOG', 'banking_analytics') }}"
       # Namespace prefix for outputs. Override per run/attendee for isolated,
       # concurrent demo spaces, e.g. DBT_SCHEMA=alice -> alice_staging/_marts/...
       schema: "{{ env_var('DBT_SCHEMA', 'dev') }}"
@@ -16,7 +16,7 @@ databricks:
 
     prod:
       type: databricks
-      catalog: banking_analytics
+      catalog: "{{ env_var('DATABRICKS_CATALOG', 'banking_analytics') }}"
       schema: prod
       host: "{{ env_var('DATABRICKS_HOST') }}"
       http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"

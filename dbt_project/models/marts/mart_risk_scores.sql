@@ -13,7 +13,29 @@
     business logic maps to a SQL model with nested CASE expressions
 */
 
-with score_input as (
+-- SAS: ORA_DW.BUREAU_SCORES holds one row per customer per pull; the scorecard
+-- joins only the latest pull on or before the score date
+-- (b.SCORE_DATE = (select max(SCORE_DATE) ... where SCORE_DATE <= "&score_date"d)).
+with latest_bureau as (
+    select
+        customer_id,
+        fico_score,
+        bureau_inqs_6mo,
+        bureau_derogs
+    from (
+        select
+            *,
+            row_number() over (
+                partition by customer_id
+                order by score_date desc
+            ) as rn
+        from {{ source('banking_raw', 'bureau_scores') }}
+        where score_date <= current_date()
+    )
+    where rn = 1
+),
+
+score_input as (
     select
         a.account_id,
         a.customer_id,
@@ -37,7 +59,7 @@ with score_input as (
             else null
         end as ltv
     from {{ ref('int_account_metrics') }} a
-    left join {{ source('banking_raw', 'bureau_scores') }} b
+    left join latest_bureau b
         on a.customer_id = b.customer_id
     left join {{ source('banking_raw', 'payment_history') }} p
         on a.account_id = p.account_id

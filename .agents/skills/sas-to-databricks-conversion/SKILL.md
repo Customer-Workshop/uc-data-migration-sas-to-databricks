@@ -23,27 +23,38 @@ this skill says *how* to do it here (exact commands, paths, namespaces).
     `dbt_project/tests/reconcile_*.sql`.
   - Cross-engine / report checks: `verify/reconcile.py`.
 - Connection is env-var based (`dbt_project/profiles.yml`): `DATABRICKS_HOST`,
-  `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`. Catalog is `banking_analytics`.
+  `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`. Catalog is `DATABRICKS_CATALOG`
+  (default `banking_analytics`). If `DATABRICKS_CLIENT_ID`/`_SECRET` are also
+  exported, `unset` them — dbt-databricks refuses two auth methods.
+- SAS golden baseline: the Dockerised estate (`ts-sas-legacy-analytics/docker`)
+  exports every SAS output table plus `row_counts.csv`/`controls.csv`; the
+  metadata copy lives in `verify/fixtures/sas_golden/` for fixture-first work.
 
 ## Namespaces (isolated, concurrent-safe)
 
 Every run is namespaced by `NS`. Outputs land in
 `banking_analytics.<NS>_staging / _intermediate / _marts / _curated`, so multiple
 runs (`NS=dev`, `NS=child1`, …) never collide and the durable "before" raw data
-in `banking_analytics.raw` is never touched. Always build into the namespace you
-were given; never write into another run's namespace or into `raw`.
+in `banking_analytics.raw` is never touched. `RAW_SCHEMA` selects which durable
+schema the models read (`raw` = synthetic, `raw_sas` = the SAS estate's own
+extracts, loaded by `make seed SEED=sas`). Always build into the namespace you
+were given; never write into another run's namespace or into any `raw*` schema.
 
 ## Build and verify
 
 ```bash
-make demo-up NS=<ns>     # seed (idempotent) + dbt build (models + schema tests + reconcile_*.sql)
-make reconcile NS=<ns>   # human-facing source->target reconciliation report (verify/reconcile.py)
+make demo-up NS=<ns> RAW_SCHEMA=raw_sas                  # seed (idempotent) + dbt build (models + tests + reconcile_*.sql)
+make reconcile NS=<ns> RAW_SCHEMA=raw_sas SAS_GOLDEN=<dir>  # source->target + SAS-parity report (verify/reconcile.py)
+make reconcile-test                                      # harness unit tests against the fixture, no Databricks
 ```
 
 - `make demo-up` runs `dbt build`, which executes the `reconcile_*.sql` singular
   tests; any returning rows fail the build.
 - `make reconcile` runs `verify/reconcile.py`, which exits non-zero on any failed
-  control and prints an attachable report.
+  control and prints an attachable report. With `SAS_GOLDEN` it also compares
+  each SAS output table / control with the model that replaces it: PASS, FAIL,
+  or SKIP ("not yet converted"). Converting a program = making its SKIPs PASS;
+  the mapping is `GOLDEN_TABLES` / `GOLDEN_CONTROLS` in `verify/reconcile.py`.
 - Tear down a namespace with `make demo-down NS=<ns>` (drops only that
   namespace's schemas; raw data untouched).
 

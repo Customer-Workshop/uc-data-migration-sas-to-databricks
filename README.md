@@ -95,6 +95,7 @@ Set environment variables for your Databricks workspace:
 export DATABRICKS_HOST="adb-1234567890123456.7.azuredatabricks.net"
 export DATABRICKS_HTTP_PATH="/sql/1.0/warehouses/abcdef1234567890"
 export DATABRICKS_TOKEN="dapi..."
+export DATABRICKS_CATALOG="banking_analytics"   # optional, this is the default
 ```
 
 ### Run the dbt Project
@@ -106,6 +107,19 @@ dbt run --select tag:staging
 dbt run --select tag:intermediate
 dbt run --select tag:marts
 ```
+
+### Run the demo lifecycle (isolated namespace)
+
+```bash
+make demo-up   NS=<ns> RAW_SCHEMA=raw_sas                 # load the SAS estate's extracts + dbt build into <ns>_*
+make reconcile NS=<ns> RAW_SCHEMA=raw_sas SAS_GOLDEN=<dir> # compare with the container's golden outputs
+make demo-down NS=<ns>                                    # drop only <ns>_* schemas
+make reconcile-test                                       # harness unit tests, no Databricks needed
+```
+
+`SAS_GOLDEN` is the `golden/` directory the Dockerised SAS estate exports
+(`ts-sas-legacy-analytics/docker`). Full walkthrough, including the parallel-session
+fan-out: [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md).
 
 ## Related Repositories
 

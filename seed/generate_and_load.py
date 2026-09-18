@@ -86,6 +86,7 @@ def generate(customers: int, accounts: int, days: int, seed: int):
             "fico_score": int(rnd.triangular(520, 840, 710)),
             "bureau_inqs_6mo": rnd.choices([0, 1, 2, 3, 5], weights=[5, 4, 2, 1, 1])[0],
             "bureau_derogs": rnd.choices([0, 1, 2, 4], weights=[7, 2, 1, 1])[0],
+            "score_date": _d(rnd.randint(1, 60)),
         })
 
     accts, pay_hist, collateral = [], [], []
@@ -245,7 +246,7 @@ SCHEMAS = {
     },
     "bureau_scores": {
         "customer_id": "STRING", "fico_score": "INT", "bureau_inqs_6mo": "INT",
-        "bureau_derogs": "INT",
+        "bureau_derogs": "INT", "score_date": "DATE",
     },
     "payment_history": {
         "account_id": "STRING", "pmt_late_90_12mo": "INT", "max_days_past_due_ever": "INT",
@@ -306,7 +307,8 @@ def load(cursor, full_schema: str, table: str, rows: list, batch: int = 1000):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--catalog", default="banking_analytics")
+    ap.add_argument("--catalog", default=os.environ.get("DATABRICKS_CATALOG", "banking_analytics"),
+                    help="Unity Catalog catalog (default: $DATABRICKS_CATALOG or banking_analytics)")
     ap.add_argument("--schema", default="raw")
     ap.add_argument("--customers", type=int, default=200)
     ap.add_argument("--accounts", type=int, default=500)
