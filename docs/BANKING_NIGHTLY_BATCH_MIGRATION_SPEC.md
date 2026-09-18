@@ -516,7 +516,18 @@ dbt_seed  →  dbt_staging  →  dbt_intermediate  →  dbt_marts  →  dbt_test
 | `dbt_seed` | `dbt seed` (SAS format catalog + golden reference tables) | `banking_formats.sas` catalog build |
 | `dbt_staging` / `dbt_intermediate` / `dbt_marts` | `dbt run --select staging` / `intermediate` / `marts` | steps 1‒4 in dependency order (`ref()` gives the finer-grained DAG inside each layer) |
 | `dbt_test` | `dbt test` — schema tests + every `reconcile_*.sql`; golden parity tests only when `golden_parity=true` | `%nobs` checks, the abort-on-failure semantics of `%run_step` |
-| `parity_report` | `verify/reconcile.py` on the job's Spark session; writes `parity_<ts>.md/.json` to `/Volumes/${catalog}/reports/parity_reports/` | `ARCHIVE.BATCH_HISTORY` + the summary email body |
+| `parity_report` | `verify/reconcile.py` on the job's Spark session; writes `parity_report_<namespace>_<curr_dt>_<utc ts>.md/.json` to `/Volumes/${catalog}/<reports schema>/parity_reports/` | `ARCHIVE.BATCH_HISTORY` + the summary email body |
+
+The dbt tasks use the project's own `dbt_project/profiles.yml` (`profiles_directory: .`,
+relative to `project_directory`): the job injects `DBT_HOST` / `DBT_ACCESS_TOKEN` for the
+run-as principal and the bundle passes the warehouse id as a dbt var, so no token is stored.
+`dbt_task.warehouse_id` is deliberately not set — the Jobs API rejects it together with a custom
+`profiles_directory`, and the generated profile would not know the namespaced schemas.
+
+Verified 2026-09-18 against the demo workspace: `databricks bundle deploy -t dev` and
+`databricks bundle run daily_banking_pipeline -t dev --params curr_dt=2024-01-31,report_month=202401,golden_parity=true`
+finished `SUCCESS` (six tasks, ~6 min on serverless); the parity report it wrote is checked in
+as `verify/golden/PARITY_REPORT_2024-01-31.md` / `.json` (31 controls passed, 0 failed).
 
 Job parameters: `curr_dt` (= `&CURR_DT`, default `{{job.start_time.iso_date}}` — the run date,
 like `today()`; pass `curr_dt=2024-01-31,report_month=202401,golden_parity=true` to replay the

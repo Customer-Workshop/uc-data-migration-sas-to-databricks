@@ -78,6 +78,9 @@ class SqlConnectorBackend:
         finally:
             cur.close()
 
+    def close(self) -> None:
+        self.con.close()
+
 
 class SparkBackend:
     """Execution inside a Databricks job task (serverless / cluster Spark session)."""
@@ -89,6 +92,9 @@ class SparkBackend:
 
     def rows(self, query: str) -> list[tuple]:
         return [tuple(r) for r in self.spark.sql(query).collect()]
+
+    def close(self) -> None:
+        pass
 
 
 CONNECTION_VARS = ("DATABRICKS_HOST", "DATABRICKS_HTTP_PATH", "DATABRICKS_TOKEN")
@@ -108,8 +114,17 @@ def make_backend():
 def as_bool(value: str | bool | None) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "y")
 
-GOLDEN_MANIFEST = Path(__file__).resolve().parent / "golden" / "manifest.json"
-KNOWN_DEVIATIONS = Path(__file__).resolve().parent / "golden" / "known_deviations.json"
+
+def default_golden_dir() -> Path:
+    # A Databricks spark_python_task exec()s the script, so __file__ is not defined there;
+    # fall back to argv[0], which the task runner sets to the uploaded file path.
+    script = globals().get("__file__") or sys.argv[0]
+    return Path(script).resolve().parent / "golden"
+
+
+GOLDEN_DIR = default_golden_dir()
+GOLDEN_MANIFEST = GOLDEN_DIR / "manifest.json"
+KNOWN_DEVIATIONS = GOLDEN_DIR / "known_deviations.json"
 
 LENDING = "('MTG', 'AUTO', 'PERS', 'CC', 'LOC', 'HELC')"
 
@@ -464,7 +479,7 @@ class Reconciler:
         self.check_mapping_parity()
         if golden:
             self.check_golden()
-        self.con.close()
+        self.backend.close()
         return all(r.status != "FAIL" for r in self.results)
 
     def render(self, golden: bool) -> str:
@@ -551,8 +566,14 @@ def main() -> int:
     ap.add_argument("--json", dest="json_path", help="Optional path to write machine-readable results")
     ap.add_argument("--report-dir",
                     help="Directory (e.g. a UC volume) receiving parity_report_<namespace>_<date>_<utc ts>.md/.json")
+    ap.add_argument("--golden-dir",
+                    help="Directory holding manifest.json / known_deviations.json (default: verify/golden next to this script)")
     args = ap.parse_args()
 
+    if args.golden_dir:
+        global GOLDEN_MANIFEST, KNOWN_DEVIATIONS
+        GOLDEN_MANIFEST = Path(args.golden_dir) / "manifest.json"
+        KNOWN_DEVIATIONS = Path(args.golden_dir) / "known_deviations.json"
     report_month = args.report_month or default_report_month(args.business_date)
     golden = as_bool(args.golden)
     rec = Reconciler(args.catalog, args.namespace, args.raw_catalog, args.raw_schema,
@@ -577,4 +598,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc = main()
+    if rc:
+        raise SystemExit(rc)

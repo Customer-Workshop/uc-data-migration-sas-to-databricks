@@ -28,14 +28,14 @@ variables:
   dbt_vars:
     description: dbt --vars payload shared by every dbt task (YAML flow mapping)
     default: >-
-      {curr_dt: "{{job.parameters.curr_dt}}",
-      report_month: "{{job.parameters.report_month}}",
-      sas_golden_parity: "{{job.parameters.golden_parity}}",
-      catalog: "${var.catalog}",
-      namespace: "${var.namespace}",
-      warehouse_id: "${var.warehouse_id}",
-      raw_catalog: "${var.raw_catalog}",
-      raw_schema: "${var.raw_schema}"}
+      {"curr_dt": "{{job.parameters.curr_dt}}",
+      "report_month": "{{job.parameters.report_month}}",
+      "sas_golden_parity": "{{job.parameters.golden_parity}}",
+      "catalog": "${var.catalog}",
+      "namespace": "${var.namespace}",
+      "warehouse_id": "${var.warehouse_id}",
+      "raw_catalog": "${var.raw_catalog}",
+      "raw_schema": "${var.raw_schema}"}
   parity_report_dir:
     description: UC volume path that receives the parity report artifacts
     default: ${resources.volumes.parity_reports.volume_path}
@@ -90,8 +90,7 @@ resources:
           environment_key: dbt
           dbt_task:
             project_directory: ../dbt_project
-            profiles_directory: ../dbt_project
-            warehouse_id: ${var.warehouse_id}
+            profiles_directory: .
             commands:
               - dbt seed --target ${bundle.target} --full-refresh --vars '${var.dbt_vars}'
           timeout_seconds: 1800
@@ -106,8 +105,7 @@ resources:
           environment_key: dbt
           dbt_task:
             project_directory: ../dbt_project
-            profiles_directory: ../dbt_project
-            warehouse_id: ${var.warehouse_id}
+            profiles_directory: .
             commands:
               - dbt run --target ${bundle.target} --select tag:staging --vars '${var.dbt_vars}'
           timeout_seconds: 3600
@@ -123,8 +121,7 @@ resources:
           environment_key: dbt
           dbt_task:
             project_directory: ../dbt_project
-            profiles_directory: ../dbt_project
-            warehouse_id: ${var.warehouse_id}
+            profiles_directory: .
             commands:
               - dbt run --target ${bundle.target} --select tag:intermediate --vars '${var.dbt_vars}'
           timeout_seconds: 3600
@@ -141,8 +138,7 @@ resources:
           environment_key: dbt
           dbt_task:
             project_directory: ../dbt_project
-            profiles_directory: ../dbt_project
-            warehouse_id: ${var.warehouse_id}
+            profiles_directory: .
             commands:
               - dbt run --target ${bundle.target} --select tag:marts --vars '${var.dbt_vars}'
           timeout_seconds: 7200
@@ -160,8 +156,7 @@ resources:
           environment_key: dbt
           dbt_task:
             project_directory: ../dbt_project
-            profiles_directory: ../dbt_project
-            warehouse_id: ${var.warehouse_id}
+            profiles_directory: .
             commands:
               - dbt test --target ${bundle.target} --vars '${var.dbt_vars}'
           timeout_seconds: 1800
@@ -194,5 +189,7 @@ resources:
               - "{{job.parameters.golden_parity}}"
               - --report-dir
               - ${var.parity_report_dir}
+              - --golden-dir
+              - ${workspace.file_path}/verify/golden
           timeout_seconds: 1800
           max_retries: 0

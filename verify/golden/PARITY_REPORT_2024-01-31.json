@@ -1,0 +1,632 @@
+{
+  "catalog": "banking_analytics",
+  "namespace": "devin_nightly",
+  "raw": "banking_analytics.raw_sas",
+  "business_date": "2024-01-31",
+  "report_month": "202401",
+  "passed": true,
+  "results": [
+    {
+      "family": "completeness",
+      "name": "account_completeness",
+      "status": "PASS",
+      "detail": "in-scope raw accounts = 466, model accounts = 466",
+      "metrics": {
+        "expected": 466,
+        "actual": 466
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "txn_feed_split",
+      "status": "PASS",
+      "detail": "feed = 622, validated = 610, rejected = 12",
+      "metrics": {
+        "feed": 622,
+        "validated": 610,
+        "rejected": 12
+      },
+      "diffs": []
+    },
+    {
+      "family": "control_total",
+      "name": "txn_feed_amount",
+      "status": "PASS",
+      "detail": "feed sum = 67444415.99, validated + rejected = 67444415.99",
+      "metrics": {
+        "feed": 67444415.99,
+        "validated": 2179522.02,
+        "rejected": 65264893.97
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "curated_append",
+      "status": "PASS",
+      "detail": "history 18293 + validated 610 = 18903, curated = 18903",
+      "metrics": {
+        "history": 18293,
+        "validated": 610,
+        "curated": 18903
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "running_balances_rows",
+      "status": "PASS",
+      "detail": "validated = 610, running_balances = 610",
+      "metrics": {
+        "validated": 610,
+        "running_balances": 610
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "risk_scores_completeness",
+      "status": "PASS",
+      "detail": "lending accounts = 236, scored rows = 236, distinct accounts = 236",
+      "metrics": {
+        "expected": 236,
+        "actual": 236,
+        "distinct": 236
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "rwa_accounts",
+      "status": "PASS",
+      "detail": "month-end snapshot = 466, sum(N_ACCOUNTS) = 466",
+      "metrics": {
+        "snapshot": 466,
+        "rwa": 466
+      },
+      "diffs": []
+    },
+    {
+      "family": "control_total",
+      "name": "rwa_total_exposure",
+      "status": "PASS",
+      "detail": "snapshot balance = 37558944.21, sum(TOTAL_EXPOSURE) = 37558944.21",
+      "metrics": {
+        "snapshot": 37558944.21,
+        "rwa": 37558944.21
+      },
+      "diffs": []
+    },
+    {
+      "family": "control_total",
+      "name": "capital_total_rwa",
+      "status": "PASS",
+      "detail": "sum(RWA) = 14156900.58, CAPITAL_ADEQUACY.TOTAL_RWA = 14156900.58",
+      "metrics": {
+        "rwa": 14156900.58,
+        "capital": 14156900.58
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "delinquency_accounts",
+      "status": "PASS",
+      "detail": "lending accounts = 236, sum(N_ACCOUNTS) = 236",
+      "metrics": {
+        "lending": 236,
+        "report": 236
+      },
+      "diffs": []
+    },
+    {
+      "family": "control_total",
+      "name": "delinquency_total_balance",
+      "status": "PASS",
+      "detail": "lending balance = 29735012.62, sum(TOTAL_BALANCE) = 29735012.62",
+      "metrics": {
+        "lending": 29735012.62,
+        "report": 29735012.62
+      },
+      "diffs": []
+    },
+    {
+      "family": "completeness",
+      "name": "llp_loans",
+      "status": "PASS",
+      "detail": "lending accounts with loan detail = 236, sum(N_LOANS) = 236",
+      "metrics": {
+        "expected": 236,
+        "report": 236
+      },
+      "diffs": []
+    },
+    {
+      "family": "control_total",
+      "name": "llp_gross_loans",
+      "status": "PASS",
+      "detail": "expected = 29735012.62, sum(GROSS_LOANS) = 29735012.62",
+      "metrics": {
+        "expected": 29735012.62,
+        "report": 29735012.62
+      },
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "rwa_risk_weight_branches",
+      "status": "PASS",
+      "detail": "12 (ACCOUNT_TYPE, RISK_WEIGHT) branches observed, 0 illegal",
+      "metrics": {
+        "branches": [
+          [
+            "AUTO",
+            "0.75"
+          ],
+          [
+            "CC",
+            "0.75"
+          ],
+          [
+            "CD",
+            "0.00"
+          ],
+          [
+            "CHK",
+            "0.00"
+          ],
+          [
+            "HELC",
+            "0.50"
+          ],
+          [
+            "IRA",
+            "1.00"
+          ],
+          [
+            "LOC",
+            "1.00"
+          ],
+          [
+            "MMA",
+            "0.00"
+          ],
+          [
+            "MTG",
+            "0.35"
+          ],
+          [
+            "MTG",
+            "0.50"
+          ],
+          [
+            "PERS",
+            "0.75"
+          ],
+          [
+            "SAV",
+            "0.00"
+          ]
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "delinquency_buckets",
+      "status": "PASS",
+      "detail": "buckets present in severity order: Current, 1-29, 30-59, 60-89, 90-119, 120-179, 180+",
+      "metrics": {
+        "buckets": [
+          "Current",
+          "1-29",
+          "30-59",
+          "60-89",
+          "90-119",
+          "120-179",
+          "180+"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "risk_rating_bands",
+      "status": "PASS",
+      "detail": "ratings observed: [3, 4]; rows outside their PD band: 0",
+      "metrics": {
+        "ratings": [
+          3,
+          4
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "capital_status_thresholds",
+      "status": "PASS",
+      "detail": "PASS/FAIL flags agree with 4.5% / 6.0% / 8.0% minimums",
+      "metrics": {},
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "acct_exception_codes",
+      "status": "PASS",
+      "detail": "exception rows by code: HIGH_UTIL=9, NEG_BAL=7, NO_RISK=16",
+      "metrics": {
+        "codes": {
+          "HIGH_UTIL": 9,
+          "NEG_BAL": 7,
+          "NO_RISK": 16
+        }
+      },
+      "diffs": []
+    },
+    {
+      "family": "mapping",
+      "name": "anomaly_types",
+      "status": "PASS",
+      "detail": "anomalies by type: HIGH_AMOUNT=16, OVERDRAFT=30",
+      "metrics": {
+        "types": {
+          "HIGH_AMOUNT": 16,
+          "OVERDRAFT": 30
+        }
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_cust_accounts_daily",
+      "status": "PASS",
+      "detail": "SAS rows = 466, dbt rows = 466, mismatched rows = 0",
+      "metrics": {
+        "sas": "STG_BANK.CUST_ACCOUNTS_DAILY",
+        "sas_rows": 466,
+        "dbt_rows": 466,
+        "mismatch_by_kind": {},
+        "columns": [
+          "account_id",
+          "mismatch",
+          "dbt_account_type",
+          "sas_account_type",
+          "dbt_account_status",
+          "sas_account_status",
+          "dbt_customer_id",
+          "sas_customer_id",
+          "dbt_dormancy_flag",
+          "sas_dormancy_flag",
+          "dbt_high_balance_flag",
+          "sas_high_balance_flag",
+          "dbt_acct_age_months",
+          "sas_acct_age_months",
+          "dbt_days_inactive",
+          "sas_days_inactive",
+          "dbt_risk_rating",
+          "sas_risk_rating",
+          "dbt_snapshot_date",
+          "sas_snapshot_date",
+          "dbt_current_balance",
+          "sas_current_balance",
+          "dbt_credit_limit",
+          "sas_credit_limit",
+          "dbt_utilization_pct",
+          "sas_utilization_pct"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_acct_exceptions",
+      "status": "PASS",
+      "detail": "SAS rows = 32, dbt rows = 32, accounts with different exception counts = 0",
+      "metrics": {
+        "sas": "STG_BANK.ACCT_EXCEPTIONS",
+        "sas_rows": 32,
+        "dbt_rows": 32,
+        "columns": [
+          "account_id",
+          "dbt_rows",
+          "sas_rows"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_daily_transactions",
+      "status": "PASS",
+      "detail": "SAS rows = 18903, dbt rows = 18903, mismatched rows = 0",
+      "metrics": {
+        "sas": "CURATED.DAILY_TRANSACTIONS",
+        "sas_rows": 18903,
+        "dbt_rows": 18903,
+        "mismatch_by_kind": {},
+        "columns": [
+          "transaction_id",
+          "mismatch",
+          "dbt_account_id",
+          "sas_account_id",
+          "dbt_transaction_date",
+          "sas_transaction_date",
+          "dbt_transaction_type",
+          "sas_transaction_type",
+          "dbt_transaction_amount",
+          "sas_transaction_amount"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_txn_anomalies",
+      "status": "PASS",
+      "detail": "SAS rows = 46, dbt rows = 46, mismatched rows = 0",
+      "metrics": {
+        "sas": "CURATED.TXN_ANOMALIES",
+        "sas_rows": 46,
+        "dbt_rows": 46,
+        "mismatch_by_kind": {},
+        "columns": [
+          "transaction_id",
+          "mismatch",
+          "dbt_account_id",
+          "sas_account_id",
+          "dbt_anomaly_type",
+          "sas_anomaly_type",
+          "dbt_running_balance",
+          "sas_running_balance",
+          "dbt_pre_txn_balance",
+          "sas_pre_txn_balance",
+          "dbt_z_score",
+          "sas_z_score"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_running_balances",
+      "status": "PASS",
+      "detail": "SAS rows = 610, dbt rows = 610, mismatched rows = 0",
+      "metrics": {
+        "sas": "CURATED.RUNNING_BALANCES",
+        "sas_rows": 610,
+        "dbt_rows": 610,
+        "mismatch_by_kind": {},
+        "columns": [
+          "transaction_id",
+          "mismatch",
+          "dbt_account_id",
+          "sas_account_id",
+          "dbt_transaction_date",
+          "sas_transaction_date",
+          "dbt_running_balance",
+          "sas_running_balance"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_risk_scores",
+      "status": "PASS",
+      "detail": "SAS rows = 236, dbt rows = 236, mismatched rows = 0",
+      "metrics": {
+        "sas": "CURATED.RISK_SCORES",
+        "sas_rows": 236,
+        "dbt_rows": 236,
+        "mismatch_by_kind": {},
+        "columns": [
+          "account_id",
+          "mismatch",
+          "dbt_account_type",
+          "sas_account_type",
+          "dbt_new_risk_rating",
+          "sas_new_risk_rating",
+          "dbt_fico_score",
+          "sas_fico_score",
+          "dbt_pmt_late_90_12mo",
+          "sas_pmt_late_90_12mo",
+          "dbt_acct_age_months",
+          "sas_acct_age_months",
+          "dbt_ltv",
+          "sas_ltv",
+          "dbt_pd",
+          "sas_pd",
+          "dbt_lgd",
+          "sas_lgd",
+          "dbt_ead",
+          "sas_ead",
+          "dbt_expected_loss",
+          "sas_expected_loss"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_risk_migration",
+      "status": "PASS",
+      "detail": "SAS rows = 195, dbt rows = 195, mismatched rows = 0",
+      "metrics": {
+        "sas": "CURATED.RISK_MIGRATION",
+        "sas_rows": 195,
+        "dbt_rows": 195,
+        "mismatch_by_kind": {},
+        "columns": [
+          "account_id",
+          "mismatch",
+          "dbt_prev_rating",
+          "sas_prev_rating",
+          "dbt_curr_rating",
+          "sas_curr_rating",
+          "dbt_migration_direction",
+          "sas_migration_direction",
+          "dbt_pd",
+          "sas_pd",
+          "dbt_expected_loss",
+          "sas_expected_loss"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_risk_summary",
+      "status": "PASS",
+      "detail": "SAS rows = 12, dbt rows = 12, mismatched rows = 0",
+      "metrics": {
+        "sas": "REPORTS.RISK_SUMMARY",
+        "sas_rows": 12,
+        "dbt_rows": 12,
+        "mismatch_by_kind": {},
+        "columns": [
+          "account_type",
+          "new_risk_rating",
+          "mismatch",
+          "dbt_n_accounts",
+          "sas_n_accounts",
+          "dbt_lgd",
+          "sas_lgd",
+          "dbt_ead",
+          "sas_ead",
+          "dbt_expected_loss",
+          "sas_expected_loss",
+          "dbt_avg_pd",
+          "sas_avg_pd",
+          "dbt_avg_lgd",
+          "sas_avg_lgd",
+          "dbt_total_ead",
+          "sas_total_ead",
+          "dbt_total_el",
+          "sas_total_el"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_monthly_rwa",
+      "status": "PASS",
+      "detail": "SAS rows = 59, dbt rows = 59, mismatched rows = 0",
+      "metrics": {
+        "sas": "REPORTS.MONTHLY_RWA",
+        "sas_rows": 59,
+        "dbt_rows": 59,
+        "mismatch_by_kind": {},
+        "columns": [
+          "report_month",
+          "account_type",
+          "customer_segment",
+          "risk_weight",
+          "mismatch",
+          "dbt_n_accounts",
+          "sas_n_accounts",
+          "dbt_total_exposure",
+          "sas_total_exposure",
+          "dbt_rwa",
+          "sas_rwa"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_delinquency_aging",
+      "status": "PASS",
+      "detail": "SAS rows = 70, dbt rows = 70, mismatched rows = 0",
+      "metrics": {
+        "sas": "REPORTS.DELINQUENCY_AGING",
+        "sas_rows": 70,
+        "dbt_rows": 70,
+        "mismatch_by_kind": {},
+        "columns": [
+          "report_month",
+          "account_type",
+          "region_code",
+          "delinq_bucket",
+          "mismatch",
+          "dbt_n_accounts",
+          "sas_n_accounts",
+          "dbt_total_balance",
+          "sas_total_balance",
+          "dbt_total_past_due",
+          "sas_total_past_due"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_llp_coverage",
+      "status": "PASS",
+      "detail": "SAS rows = 6, dbt rows = 6, mismatched rows = 0",
+      "metrics": {
+        "sas": "REPORTS.LLP_COVERAGE",
+        "sas_rows": 6,
+        "dbt_rows": 6,
+        "mismatch_by_kind": {},
+        "columns": [
+          "report_month",
+          "account_type",
+          "mismatch",
+          "dbt_n_loans",
+          "sas_n_loans",
+          "dbt_gross_loans",
+          "sas_gross_loans",
+          "dbt_total_allowance",
+          "sas_total_allowance",
+          "dbt_coverage_pct",
+          "sas_coverage_pct",
+          "dbt_npl_balance",
+          "sas_npl_balance",
+          "dbt_npl_coverage_pct",
+          "sas_npl_coverage_pct"
+        ]
+      },
+      "diffs": []
+    },
+    {
+      "family": "golden",
+      "name": "golden_capital_adequacy",
+      "status": "PASS",
+      "detail": "SAS rows = 1, dbt rows = 1, mismatched rows = 0",
+      "metrics": {
+        "sas": "REPORTS.CAPITAL_ADEQUACY",
+        "sas_rows": 1,
+        "dbt_rows": 1,
+        "mismatch_by_kind": {},
+        "columns": [
+          "report_month",
+          "mismatch",
+          "dbt_cet1_status",
+          "sas_cet1_status",
+          "dbt_tier1_status",
+          "sas_tier1_status",
+          "dbt_total_capital_status",
+          "sas_total_capital_status",
+          "dbt_cet1_capital",
+          "sas_cet1_capital",
+          "dbt_tier1_capital",
+          "sas_tier1_capital",
+          "dbt_total_capital",
+          "sas_total_capital",
+          "dbt_total_rwa",
+          "sas_total_rwa",
+          "dbt_cet1_ratio",
+          "sas_cet1_ratio",
+          "dbt_tier1_ratio",
+          "sas_tier1_ratio",
+          "dbt_total_capital_ratio",
+          "sas_total_capital_ratio"
+        ]
+      },
+      "diffs": []
+    }
+  ]
+}
