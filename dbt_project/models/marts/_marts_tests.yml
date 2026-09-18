@@ -68,9 +68,9 @@ models:
         description: >
           Cumulative balance after this transaction, seeded at the account's
           start-of-day balance. SQL window function replacing SAS RETAIN +
-          BY-group logic.
-        data_tests:
-          - not_null
+          BY-group logic. Missing for a transaction on an account that is not
+          in the account snapshot, as it is in SAS, where the retained value
+          stays missing and the anomaly step reads it as OVERDRAFT.
 
   - name: mart_risk_scores
     description: >

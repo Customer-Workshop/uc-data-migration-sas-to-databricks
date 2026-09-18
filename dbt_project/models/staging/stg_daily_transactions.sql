@@ -9,7 +9,8 @@
   dbt Equivalent:
     The same rules as an ordered CASE producing rejection_reason; rows with no
     reason are the validated feed. SAS missing() is true for a blank character
-    value as well as a null, so both are treated as missing here.
+    value as well as a null, so both are treated as missing here, and a missing
+    TRANSACTION_TYPE is not in the SAS value list, so it is rejected.
 */
 
 with source as (
@@ -28,7 +29,7 @@ validated as (
                 then 'Missing TRANSACTION_AMOUNT'
             when abs(transaction_amount) > 10000000
                 then 'Amount exceeds threshold'
-            when transaction_type
+            when transaction_type is null or transaction_type
                 not in ('DEP', 'WDR', 'TRF', 'PMT', 'FEE', 'INT', 'ADJ', 'REV', 'CHG', 'REF')
                 then 'Invalid transaction type'
             when transaction_date > {{ sas_run_date() }}
