@@ -68,7 +68,8 @@ class CheckResult:
 GOLDEN_TABLE_MAP = {
     "STG_BANK.CUST_ACCOUNTS_DAILY": ("intermediate", "int_account_metrics",
                                      "load_customer_accounts.sas"),
-    "STG_BANK.ACCT_EXCEPTIONS": (None, None, "load_customer_accounts.sas"),
+    "STG_BANK.ACCT_EXCEPTIONS": ("intermediate", "int_account_exceptions",
+                                 "load_customer_accounts.sas"),
     "CURATED.DAILY_TRANSACTIONS": ("marts", "mart_daily_transactions",
                                    "daily_transaction_processing.sas"),
     "CURATED.TXN_ANOMALIES": ("marts", "mart_transaction_anomalies",
@@ -166,6 +167,68 @@ class Reconciler:
             )
         )
 
+    # The exception branch of load_customer_accounts.sas, Step 2: one row per
+    # rule that fires, so the grain is (account, exception code).
+    _EXCEPTION_RULES = {
+        "NEG_BAL": "account_type in ('CHK', 'SAV', 'MMA', 'CD') and current_balance < 0",
+        "HIGH_UTIL": ("account_type in ('CC', 'LOC', 'HELC') and credit_limit > 0"
+                      " and (current_balance / credit_limit) * 100 > 95"),
+        "NO_RISK": "risk_rating is null",
+    }
+
+    def _in_scope_cte(self) -> str:
+        """Step 1's extract scope, the population the exception rules run over."""
+        return f"""
+            with in_scope as (
+                select a.*, d.risk_rating
+                from {self.raw}.cust_accounts a
+                inner join {self.raw}.cust_demographics d on a.customer_id = d.customer_id
+                where a.account_status not in ('W', 'C')
+                  and a.open_date <= {self._run_date_sql}
+            )
+        """
+
+    def check_exception_completeness(self):
+        """Exception rows must equal what the three SAS rules emit from source."""
+        predicates = " + ".join(
+            f"count_if({p})" for p in self._EXCEPTION_RULES.values()
+        )
+        expected = self._scalar(f"{self._in_scope_cte()} select {predicates} from in_scope")
+        actual = self._scalar(
+            f"select count(*) from {self.intermediate}.int_account_exceptions"
+        )
+        ok = expected == actual
+        self.results.append(CheckResult(
+            "exception_completeness",
+            "PASS" if ok else "FAIL",
+            f"SAS rules on raw = {expected}, model exceptions = {actual}",
+            {"expected": expected, "actual": actual},
+            program="load_customer_accounts.sas",
+        ))
+
+    def check_exception_code_parity(self):
+        """Per-code parity: each rule must fire on exactly the source population.
+
+        A total can tie out while one rule over-fires and another under-fires,
+        so every EXCEPTION_CODE is reconciled on its own.
+        """
+        for code, predicate in self._EXCEPTION_RULES.items():
+            expected = self._scalar(
+                f"{self._in_scope_cte()} select count_if({predicate}) from in_scope"
+            )
+            actual = self._scalar(
+                f"select count(*) from {self.intermediate}.int_account_exceptions"
+                f" where exception_code = '{code}'"
+            )
+            ok = expected == actual
+            self.results.append(CheckResult(
+                f"exception_parity::{code.lower()}",
+                "PASS" if ok else "FAIL",
+                f"SAS rule = {expected}, model = {actual}",
+                {"expected": expected, "actual": actual},
+                program="load_customer_accounts.sas",
+            ))
+
     # ------------------------------------------------- SAS golden comparison
     def _read_golden_csv(self, name: str) -> list[dict]:
         path = self.sas_golden / name
@@ -246,6 +309,8 @@ class Reconciler:
     # ------------------------------------------------------------------- driver
     def run(self) -> bool:
         self.check_account_completeness()
+        self.check_exception_completeness()
+        self.check_exception_code_parity()
         if self.sas_golden:
             self.check_sas_row_counts()
             self.check_sas_control_totals()

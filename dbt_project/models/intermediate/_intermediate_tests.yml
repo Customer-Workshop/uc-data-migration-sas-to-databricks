@@ -60,6 +60,43 @@ models:
         data_tests:
           - not_null
 
+  - name: int_account_exceptions
+    description: >
+      Data-quality exceptions raised by load_customer_accounts.sas (Step 2's
+      exception branch, appended to STG_BANK.ACCT_EXCEPTIONS in Step 3). One
+      row per rule that fires, so the grain is (account_id, exception_code).
+      Source quirks reproduced and flagged in the model header: the SAS landing
+      table loses EXCEPTION_CODE/EXCEPTION_DESC to a `drop` that applies to both
+      output datasets, and exception rows carry no SNAPSHOT_DATE/LOAD_TIMESTAMP
+      because both are assigned after the output statements.
+      Grain (account_id, exception_code) is enforced by
+      tests/reconcile_exception_detail_parity.sql, which compares the model to
+      the rules re-evaluated on the raw source as a multiset.
+    columns:
+      - name: account_id
+        data_tests:
+          - not_null
+
+      - name: exception_code
+        description: >
+          SAS rule that raised the row. Emission order within an account is
+          NEG_BAL, HIGH_UTIL, NO_RISK.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['NEG_BAL', 'HIGH_UTIL', 'NO_RISK']
+
+      - name: exception_desc
+        description: >
+          Message the SAS catx()/put() expression built for the rule.
+        data_tests:
+          - not_null
+
+      - name: snapshot_date
+        description: >
+          Always null — SAS assigns SNAPSHOT_DATE after the exception rows are
+          output, so they leave the DATA step missing it (source-faithful).
+
   - name: int_claims_adjudication
     description: >
       Claims with fraud screening and auto-adjudication results.
