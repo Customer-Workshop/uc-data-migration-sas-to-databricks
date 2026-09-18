@@ -17,6 +17,12 @@ sources:
         description: "Customer demographics (SAS: ORA_DW.CUST_DEMOGRAPHICS)"
       - name: daily_transactions
         description: "Daily transaction feed (SAS: RAW_BANK.TXN_FEED_YYYYMMDD)"
+      - name: curated_daily_transactions_history
+        description: >
+          Transaction history already in the curated layer before the business
+          date's run (SAS: CURATED.DAILY_TRANSACTIONS as PROC APPEND finds it).
+          daily_transaction_processing.sas reads it for the 90-day anomaly
+          baseline and appends the day's feed to it.
       - name: loan_details
         description: "Loan detail records (SAS: ORA_DW.LOAN_DETAILS)"
       - name: bureau_scores

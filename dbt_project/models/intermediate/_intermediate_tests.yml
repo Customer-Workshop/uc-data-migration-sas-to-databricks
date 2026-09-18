@@ -60,6 +60,36 @@ models:
         data_tests:
           - not_null
 
+  - name: int_txn_with_balance
+    description: >
+      Business-date transactions enriched from the account snapshot, with the
+      per-row POST_TXN_BALANCE and the BY-group RUNNING_BALANCE. Migrated from
+      daily_transaction_processing.sas (Step 2 PROC SQL + Step 3 RETAIN).
+    columns:
+      - name: transaction_id
+        description: Primary key — one row per validated transaction.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        data_tests:
+          - not_null
+
+      - name: transaction_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [DEP, WDR, TRF, PMT, FEE, INT, ADJ, REV, CHG, REF]
+
+      - name: post_txn_balance
+        description: >
+          Snapshot balance moved by this transaction only — source-faithful,
+          so it is not the cumulative balance.
+
+      - name: running_balance
+        description: Cumulative balance, seeded at the start-of-day balance.
+
   - name: int_claims_adjudication
     description: >
       Claims with fraud screening and auto-adjudication results.

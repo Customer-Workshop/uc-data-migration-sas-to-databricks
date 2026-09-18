@@ -1,88 +1,58 @@
 /*
   mart_daily_transactions.sql
-  Migrated from: Programs/Banking/daily_transaction_processing.sas (Step 2 + 5)
+  Migrated from: Programs/Banking/daily_transaction_processing.sas (Step 5)
 
   SAS Original:
-    PROC SQL enrichment join + DATA step running balance with RETAIN
+      proc append base=CURATED.DAILY_TRANSACTIONS
+                  data=WORK.TXN_WITH_BALANCE force;
+
+    CURATED.DAILY_TRANSACTIONS already holds the transaction history; the daily
+    run appends the business date's validated feed to it.
 
   dbt Equivalent:
-    SQL JOIN replaces PROC SQL, window function replaces RETAIN + BY-group logic
-    SAS PROC APPEND to CURATED.DAILY_TRANSACTIONS becomes incremental materialization
+    A table that unions the curated history with the validated feed for the
+    business date. Rebuilding produces exactly the same set, where re-running
+    the SAS job would append the same rows twice.
+
+  Source-faithful quirk reproduced here (flagged, not endorsed):
+    PROC APPEND ... FORCE drops the nine enrichment columns that
+    WORK.TXN_WITH_BALANCE carries (ACCOUNT_TYPE, CUSTOMER_ID,
+    PRE_TXN_BALANCE, RUNNING_BALANCE, ...), because the history table does not
+    have them. The curated table therefore holds only the ten feed columns, and
+    that is what this mart holds. The enrichment and running balances live in
+    int_txn_with_balance and mart_running_balances.
 */
 
-{{
-    config(
-        materialized='incremental',
-        unique_key='transaction_id',
-        incremental_strategy='merge'
-    )
-}}
-
-with transactions as (
-    select * from {{ ref('stg_daily_transactions') }}
-),
-
-accounts as (
-    select * from {{ ref('int_account_metrics') }}
-),
-
--- SAS: PROC SQL creating WORK.TXN_ENRICHED (join transactions to accounts)
--- running_balance computed via window function (replaces RETAIN + BY-group)
-base as (
+with history as (
     select
-        t.transaction_id,
-        t.account_id,
-        t.transaction_date,
-        t.transaction_type,
-        t.transaction_amount,
-        t.description,
-        a.account_type,
-        a.customer_id,
-        a.customer_segment,
-        a.region_code,
-        a.branch_id,
-        a.current_balance,
-        a.risk_rating,
-
-        -- SAS: RETAIN RUNNING_BALANCE — replaced by window function
-        sum(
-            case
-                when t.transaction_type in ('DEP','INT','REF','REV')
-                    then t.transaction_amount
-                when t.transaction_type in ('WDR','PMT','FEE','CHG')
-                    then -abs(t.transaction_amount)
-                when t.transaction_type in ('TRF','ADJ')
-                    then t.transaction_amount
-                else 0
-            end
-        ) over (
-            partition by t.account_id
-            order by t.transaction_date, t.transaction_id
-            rows unbounded preceding
-        ) + a.current_balance as running_balance,
-
-        {{ format_account_type('a.account_type') }} as account_type_desc,
-        {{ format_txn_category('t.transaction_type') }} as transaction_type_desc
-
-    from transactions t
-    left join accounts a
-        on t.account_id = a.account_id
+        transaction_id,
+        account_id,
+        transaction_date,
+        transaction_type,
+        transaction_amount,
+        channel,
+        merchant_category,
+        description,
+        post_date,
+        currency_code
+    from {{ source('banking_raw', 'curated_daily_transactions_history') }}
 ),
 
--- Derive pre/post balances from running_balance so multi-txn accounts are correct
-enriched as (
+todays_feed as (
     select
-        *,
-        running_balance as post_txn_balance,
-        lag(running_balance, 1, current_balance) over (
-            partition by account_id
-            order by transaction_date, transaction_id
-        ) as pre_txn_balance
-    from base
+        transaction_id,
+        account_id,
+        transaction_date,
+        transaction_type,
+        transaction_amount,
+        channel,
+        merchant_category,
+        description,
+        post_date,
+        currency_code
+    from {{ ref('stg_daily_transactions') }}
 )
 
-select * from enriched
-
-{% if is_incremental() %}
-where transaction_date >= (select max(transaction_date) from {{ this }})
-{% endif %}
+select * from history
+union all
+select * from todays_feed

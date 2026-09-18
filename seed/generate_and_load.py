@@ -242,6 +242,17 @@ SCHEMAS = {
     "daily_transactions": {
         "transaction_id": "STRING", "account_id": "STRING", "transaction_amount": "DOUBLE",
         "transaction_type": "STRING", "transaction_date": "DATE", "description": "STRING",
+        "channel": "STRING", "merchant_category": "STRING", "post_date": "DATE",
+        "currency_code": "STRING",
+    },
+    # Curated transaction history the daily run appends to (SAS:
+    # CURATED.DAILY_TRANSACTIONS). The synthetic feed has no separate history,
+    # so this is created empty; the raw_sas extract carries the real one.
+    "curated_daily_transactions_history": {
+        "transaction_id": "STRING", "account_id": "STRING", "transaction_date": "DATE",
+        "transaction_type": "STRING", "transaction_amount": "DOUBLE", "channel": "STRING",
+        "merchant_category": "STRING", "description": "STRING", "post_date": "DATE",
+        "currency_code": "STRING",
     },
     "bureau_scores": {
         "customer_id": "STRING", "fico_score": "INT", "bureau_inqs_6mo": "INT",
